@@ -1,0 +1,18 @@
+{
+  "example": "04-blocked-negative-budget",
+  "today": "2026-11-12",
+  "executionStatus": "COMPLETED",
+  "businessStatus": "BLOCKED",
+  "score": 80,
+  "handoff": "NOT_ELIGIBLE",
+  "tools": [
+    "checkCampaignFields",
+    "evaluateCampaignReadiness"
+  ],
+  "clarificationFields": [],
+  "risks": [
+    "INVALID_BUDGET"
+  ],
+  "launchPlan": "BLOCKED_CAMPAIGN_HAS_NO_PLAN",
+  "summary": "Campaign is BLOCKED: A supplied budget must be a positive, finite number."
+}

@@ -2,8 +2,17 @@ import { randomUUID } from "node:crypto";
 
 import Fastify, { type FastifyError } from "fastify";
 
+import {
+  createExtractorFromEnv,
+  createProviderFromEnv,
+  type AgentProvider,
+  type BriefExtractor,
+} from "./agent/index.js";
+import { createRunStore, type RunStore } from "./persistence/run-store.js";
 import { loggerOptions } from "./observability/logger.js";
 import { healthRoutes } from "./routes/health.js";
+import { recordRoutes } from "./routes/records.js";
+import { runRoutes } from "./routes/runs.js";
 
 interface ErrorResponse {
   error: {
@@ -20,14 +29,34 @@ function requestIdFromHeader(header: string | string[] | undefined): string {
   return candidate && REQUEST_ID_PATTERN.test(candidate) ? candidate : randomUUID();
 }
 
-export function buildApp() {
+export interface BuildAppOptions {
+  readonly createProvider?: () => AgentProvider;
+  readonly createExtractor?: () => BriefExtractor;
+  /** Defaults to a private in-memory store so tests never touch disk. */
+  readonly store?: RunStore;
+  readonly today?: () => string;
+}
+
+export function buildApp(options: BuildAppOptions = {}) {
   const app = Fastify({
     logger: loggerOptions,
     requestIdHeader: false,
     genReqId: (request) => requestIdFromHeader(request.headers["x-request-id"]),
   });
 
+  const store = options.store ?? createRunStore(":memory:");
+  app.addHook("onClose", async () => {
+    store.close();
+  });
+
   app.register(healthRoutes);
+  app.register(recordRoutes, { store });
+  app.register(runRoutes, {
+    store,
+    createProvider: options.createProvider ?? (() => createProviderFromEnv()),
+    createExtractor: options.createExtractor ?? (() => createExtractorFromEnv()),
+    ...(options.today ? { today: options.today } : {}),
+  });
 
   app.setNotFoundHandler((request, reply) => {
     const response: ErrorResponse = {
@@ -42,6 +71,21 @@ export function buildApp() {
   });
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
+    const status = error.statusCode;
+    if (status !== undefined && status >= 400 && status < 500) {
+      const clientError: ErrorResponse = {
+        error: {
+          code: status === 413 ? "PAYLOAD_TOO_LARGE" : "INVALID_REQUEST",
+          message:
+            status === 413
+              ? "Request body is too large"
+              : "The request could not be processed",
+        },
+        requestId: request.id,
+      };
+      return reply.code(status).send(clientError);
+    }
+
     request.log.error(
       { err: error, requestId: request.id },
       "Request failed",

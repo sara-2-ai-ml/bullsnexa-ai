@@ -2,6 +2,8 @@
 
 Incremental build diary for BullsNexa. This log records what exists, why it exists, and how it was actually verified. Its phase-oriented, evidence-first structure was informed by the read-only [PILOT AI engineering log](https://github.com/sara-2-ai-ml/pilot-flight-agent/blob/main/ENGINEERING_LOG.md); no PILOT code was copied or modified.
 
+> **Reading note.** This log is chronological. Statements in an earlier phase describe the project at that time (for example, test counts or "not yet implemented" items); the README is the current source of truth.
+
 ## Phase 0 — Backend foundation
 
 Status: complete, with Docker execution not verified and the optional provider smoke test skipped because credentials were absent.
@@ -292,3 +294,85 @@ Verification on 2026-11-12 used Node 25.6.1, outside the declared Node 24 target
 There is intentionally no overall run deadline, distributed cancellation, worker isolation, persistence, real Claude provider, database, UI, approval endpoint, or advertising integration. **Not in production today.**
 
 Phase 2B stops here pending review.
+
+## Phase 3 — Claude agent and secure policy retrieval
+
+**Decision.** One Claude-driven agent inside the existing orchestrator, not a framework or multi-agent graph: the task is a short, safety-critical pipeline where deterministic code must stay authoritative. Claude proposes the next step; the backend validates, authorizes and decides.
+
+**Protocol.** Six tools (3 business, 3 control) with `tool_choice: any` and parallel tool use disabled. The provider keeps a per-run transcript with matching `tool_use_id`/`tool_result`, committed only after a successful response so orchestrator retries do not corrupt it. Non-`tool_use` stops, multiple tool blocks, and bad control arguments fail safely with no decision. Unknown tool names reach the orchestrator, which rejects them.
+
+**Trust.** Brief and policy text are bounded, escaped data (300-char strings, 20 items, depth 4, 4000 chars). `ask_user` questions come from the trusted field check; `finish` is allowed only after a successful evaluation; `refuse` maps fixed codes to fixed reasons. Regression tests cover injection in `additionalNotes` and in policy text.
+
+**Reliability and cost.** Provider default timeout 25 s via the existing orchestrator option; `maxRetries: 0`; one orchestrator retry for rate-limit/connection/5xx only; 401/400 not retried. `max_tokens` 512. Usage is the sum of what the API reported.
+
+**Policy retrieval.** Root derived from `import.meta.url`, tested after `chdir`; Dockerfile copies `data/`.
+
+**Verification (2026-11-12).** Typecheck and build passed; 10 test files, 138 tests passed (104 earlier + 27 provider + 7 policy). Node 25.6.1, not the Node 24 target. The demo shows the three-tool simulated path and injection resistance.
+
+**Not verified.** Live Anthropic calls (none made), Docker runtime, Node 24. Structured briefs only; no natural-language extraction. **Not in production today.**
+
+Phase 3 stops here pending review.
+
+## Run API, UI and Phase 4 — free-text brief intake
+
+**Decision.** Natural-language input is the main gap between the evaluator and a usable tool, so extraction is added as a separate, narrow step in front of the unchanged agent. It is not part of the decision path: Claude only transcribes explicitly stated fields into a draft brief; validation, scoring and status remain deterministic.
+
+**Safety design.** One forced tool call with an `additionalProperties: false` schema; delimited and escaped untrusted text; the trusted `today` date passed separately; every field re-validated by the domain schema (unknown keys such as `status` or `score` are dropped and reported); bad or ambiguous responses fail with sanitized codes; no retries; abort/timeout propagated. The UI shows the draft for human review before any evaluation. The extractor is told to omit anything not stated; this reduces but cannot eliminate misreads, which is why the review step exists.
+
+**API.** `POST /api/extract` (16 KB limit, 3–4000 characters), `POST /api/runs` (32 KB), `GET /api/config`, `GET /`. Client errors return 4xx with a consistent shape; configuration errors return 503 without secrets.
+
+**Verification (2026-11-12).** Typecheck and build passed; 12 test files, 172 tests passed on Node 22 (author's Linux copy). An end-to-end run on the built server (extract, then run) returned `COMPLETED / READY / 100` using the simulated extractor and provider.
+
+**Not verified.** Live Claude extraction and agent runs (no API call was made), extraction quality on messy real briefs, Docker runtime, Node 24, the UI in multiple browsers. **Not in production today.**
+
+## Phase 5 — Human approval and observability
+
+**Decision.** Persistence and approval sit around the unchanged agent: the agent still ends at a trusted decision, and a separate deterministic rule maps that decision to a handoff state. A model never decides whether something may be handed off.
+
+**Storage.** Node's built-in `node:sqlite` avoids a native dependency (better-sqlite3 has no guaranteed prebuilt binary for every Node version used here). Three tables (runs, run_events, approvals), parameterized statements, foreign keys, one approval row per run enforced by the primary key. If saving fails the decision is still returned, flagged `persisted: false`, and the error is logged without the brief.
+
+**Approval integrity.** The v2 approval hash is SHA-256 over canonical JSON containing a versioned domain separator, the specific `runId`, brief, trusted decision, and derived launch plan. The server compares it with the stored plan at write time and again on every read, so a changed plan invalidates an earlier approval instead of silently carrying it over, and identical plans from different runs cannot share an approval.
+
+**Honest limits.** No authentication: reviewer names are labels. No change-and-resubmit workflow: a corrected brief is a new run with its own hash. `node:sqlite` is experimental. The database is local to the process or volume.
+
+**Verification (2026-11-12).** Typecheck and build passed; 13 test files, 187 tests passed on Node 22 in the author's Linux copy (new: 15 for handoff rule, store, hash and approval API including stale-hash, double-decision, blocked, invalidation and storage-failure cases). Real built server: run → `NEEDS_REVIEW / PENDING_APPROVAL`, approval recorded with the matching hash, file database created.
+
+**Not verified.** Live Claude, Docker runtime (including the `/app/var` volume), Node 24, UI in several browsers. **Not in production today.**
+
+## Phase 6 — Evaluations, fault injection and end-to-end verification
+
+**Decision.** The 15-case dataset existed since Phase 1 but only 8 cases ran, and only against the pure evaluator. Phase 6 invokes the agent for all 15 cases so the claims in earlier phases (injection resistance, controlled failures, approval integrity) are exercised rather than merely asserted. This does not mean that all 15 are complete HTTP end-to-end tests.
+
+**Design.** Cases 01–08 are deterministic business workflows that run twice (mock provider and simulated-Claude provider) and must produce the same trusted result. Cases 09–14 exercise dedicated fault and security scenarios: an obedient extractor and a "skip validation" provider (injection), a temp copy of the policies with an appended malicious paragraph (policy injection), a policy copy with all or one file removed (missing source), a hanging tool (timeout, abort observed), text-only and wrongly shaped provider output (malformed), and an unlisted and a registered-but-unauthorized tool (authorization, never executed). Case 15 invokes the agent and then combines its result with approval-integrity checks for a changed plan. The dataset's `executionScope` and `expectedOutcome` values for cases 09–15 deliberately preserve their historical Phase 1 classification; an explicit dataset note distinguishes that legacy metadata from current Phase 6 execution. Scenario-specific Phase 6 expectations live in `src/eval`.
+
+**Findings worth recording.** The agent and the pure evaluator intentionally differ on missing or ambiguous fields (clarification versus `NEEDS_REVIEW`); the evaluation encodes the agent-level behavior explicitly. A historical manual mutation check temporarily changed the FINISH guard's error code, caused case 09 to fail, and was then reverted. This was a one-off manual check, not an automated mutation-testing suite.
+
+**Verification (2026-11-12).** `npm run eval`: 15/15 cases passed. Full suite and build results are recorded in the final report below the test count in the README.
+
+**Not verified.** Live Claude behavior, Docker image build and run (no Docker in the authoring environment; a static test only), Node 24, UI in several browsers, load. **Not in production today.**
+
+## Phase 3 closure — deterministic launch plan
+
+**Gap closed.** The roadmap's Phase 3 lists `createLaunchPlan` and a human-readable summary; only the summary existed. The plan is built by a pure function from the validated brief and the trusted decision, so the model cannot influence its content. It is also exposed as an optional tool (after evaluation only, no arguments) to match the roadmap, but the API computes it from stored data and does not depend on the model calling it.
+
+**Decisions.** Money is split in integer cents so channel amounts always add up to the total (remainder cents go to the first channels); the split is explicitly an equal-split placeholder because inventing an optimization would be an unverified claim. BLOCKED campaigns get no plan, and an invalid brief gets none (for example an unsupported channel), which the evaluations assert. The approval hash covers the plan, so a future change to the plan format also invalidates old approvals.
+
+**Verification (2026-11-12).** Typecheck and build passed; 16 test files, 205 tests passed on Node 22 in the author's Linux copy (new: plan values, cent-exact split, determinism, NEEDS_REVIEW checklist, BLOCKED/invalid-brief behavior, tool preconditions, tool-limit fit, API fields). The 15-case evaluation also checks the plan expectation per case and passed 15/15.
+
+**Not verified.** Live Claude calling this tool, Docker runtime, Node 24. **Not in production today.**
+
+## Phase 7 — Documentation and submission
+
+Status: complete for documentation; live Claude, Docker and Node 24 remain unverified.
+
+**What was added.** A rewritten README covering problem statement, scope and non-scope, business cases, architecture and data flow, setup, verification with an explicit verified/not-verified table, example inputs and expected outputs, trade-offs, limitations, next steps and a "Real-world usage" section (Not in production today). Sample inputs live in `examples/briefs`, `examples/free-text` and expected outputs in `examples/expected`. `npm run examples` re-runs them with a fixed evaluation date and fails on any difference; it also checks that the mock and simulated-Claude providers agree on every brief.
+
+**Decisions.** Expected outputs are generated once and then protected by `tests/examples.test.ts`, which also asserts the key outcomes with independent hand-written values, so a wrong generated file cannot silently become the truth. Sample dates are in 2027; the fixed date keeps checks stable.
+
+**Verification (2026-11-12).** 17 test files, 213 tests passed on Node 22 (Linux copy, after the UI and route changes); `npm run eval` 15/15; `npm run examples` all match; build and typecheck passed.
+
+**Live check (2026-11-12, after the entries above).** The author ran `npm run smoke:agent` against real Claude on Windows: PASS, `COMPLETED`, `READY`, score 100, tools `checkCampaignFields` and `evaluateCampaignReadiness`, 3 requests, 6199 input / 55 output tokens. One run only; no other live behavior was exercised.
+
+**UI (2026-11-12, evening).** The tool UI was redesigned (guided three-step flow, form synchronized with an advanced JSON editor, verdict card, launch plan tiles, approval panel, readable trace) and a home page was added at `/`; the tool moved to `/app`. `npm start` now reads `.env` (before, only `smoke:agent` did, so the server silently ran the default mock provider). Both pages load no external resource and use no `innerHTML`; tests assert both. The UI was checked in headless Chromium against canned API responses at desktop, mobile and dark widths, and the data flow was checked against the real server's routes; it was not exercised end to end in a real browser against live Claude. Home page copy describes audiences as illustrative: the product has no customers.
+
+**Not verified.** Live Claude beyond that single smoke run (evaluation cases, injection, free-text extraction), Docker build/run, Node 24, extraction on messy real text, multiple browsers. **Not in production today.**

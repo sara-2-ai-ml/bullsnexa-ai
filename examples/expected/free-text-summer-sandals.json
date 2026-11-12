@@ -1,0 +1,54 @@
+{
+  "example": "summer-sandals",
+  "today": "2026-11-12",
+  "extractor": "simulated-extractor",
+  "extractedFields": [
+    "budgetAmount",
+    "currency",
+    "startDate",
+    "endDate",
+    "channels",
+    "objective",
+    "targetCountry",
+    "targetKpi",
+    "campaignName",
+    "targetAudience",
+    "category"
+  ],
+  "droppedFields": [],
+  "brief": {
+    "budgetAmount": 20000,
+    "currency": "EUR",
+    "startDate": "2027-06-01",
+    "endDate": "2027-06-30",
+    "channels": [
+      "search",
+      "social"
+    ],
+    "objective": "sales",
+    "targetCountry": "DE",
+    "targetKpi": {
+      "metric": "purchases",
+      "targetValue": 500
+    },
+    "campaignName": "Summer Sandals",
+    "targetAudience": "young adults who buy sandals",
+    "category": "retail"
+  },
+  "run": {
+    "example": "summer-sandals",
+    "today": "2026-11-12",
+    "executionStatus": "COMPLETED",
+    "businessStatus": "READY",
+    "score": 100,
+    "handoff": "CLEARED",
+    "tools": [
+      "checkCampaignFields",
+      "evaluateCampaignReadiness"
+    ],
+    "clarificationFields": [],
+    "risks": [],
+    "launchPlan": "AVAILABLE",
+    "summary": "Campaign is READY for planning or handoff with readiness score 100."
+  }
+}

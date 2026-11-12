@@ -1,0 +1,23 @@
+{
+  "example": "05-incomplete-needs-clarification",
+  "today": "2026-11-12",
+  "executionStatus": "WAITING_FOR_CLARIFICATION",
+  "businessStatus": null,
+  "score": null,
+  "handoff": "NOT_APPLICABLE",
+  "tools": [
+    "checkCampaignFields"
+  ],
+  "clarificationFields": [
+    "objective",
+    "targetCountry",
+    "budgetAmount",
+    "currency",
+    "startDate",
+    "endDate",
+    "targetKpi"
+  ],
+  "risks": [],
+  "launchPlan": null,
+  "summary": "Campaign needs clarification: Which supported objective applies: leads, sales, awareness, traffic, or app_installs? What is the target country as an ISO alpha-2 code, such as DE or US? What is the campaign budget amount? Which supported currency applies: USD, EUR, or GBP? What is the start date in YYYY-MM-DD format? What is the end date in YYYY-MM-DD format? What KPI metric and positive numeric target should measure success?"
+}

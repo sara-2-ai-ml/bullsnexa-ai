@@ -21,6 +21,13 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
+# Synthetic policy documents read by the searchCampaignPolicies tool.
+COPY --chown=node:node data ./data
+# Single-file UI served at /.
+COPY --chown=node:node public ./public
+# SQLite file for runs and approvals; mount a volume here to keep data across containers.
+RUN mkdir -p /app/var && chown node:node /app/var
+ENV DATABASE_PATH=/app/var/bullsnexa.sqlite
 USER node
 EXPOSE 3000
 CMD ["node", "dist/server.js"]

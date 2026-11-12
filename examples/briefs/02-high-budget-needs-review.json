@@ -1,0 +1,13 @@
+{
+  "campaignName": "Synthetic Winter Boots",
+  "objective": "sales",
+  "targetAudience": "Synthetic outdoor shoppers",
+  "targetCountry": "US",
+  "channels": ["search", "social"],
+  "budgetAmount": 150000,
+  "currency": "USD",
+  "startDate": "2027-01-10",
+  "endDate": "2027-02-10",
+  "targetKpi": { "metric": "purchases", "targetValue": 900 },
+  "category": "retail"
+}

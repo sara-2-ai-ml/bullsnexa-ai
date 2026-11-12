@@ -1,0 +1,13 @@
+{
+  "campaignName": "Synthetic Spring Launch",
+  "objective": "sales",
+  "targetAudience": "Synthetic retail audience",
+  "targetCountry": "US",
+  "channels": ["search", "social"],
+  "budgetAmount": 25000,
+  "currency": "USD",
+  "startDate": "2027-03-01",
+  "endDate": "2027-03-31",
+  "targetKpi": { "metric": "purchases", "targetValue": 500 },
+  "category": "retail"
+}

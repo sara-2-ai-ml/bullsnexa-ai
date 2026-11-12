@@ -1,244 +1,340 @@
-# BullsNexa
+# BullsNexa — AI-Powered Campaign Intelligence
 
-> BullsNexa is an independent technical-assignment prototype and is not an official Bulls Vision Group product.
+> BullsNexa is an independent technical-assignment prototype. It is not an official Bulls Vision Group product, and its rules and policy documents are **synthetic demonstration material**, not real business or legal guidance.
 
-BullsNexa is intended to turn a marketing campaign brief into a validated, actionable campaign launch-readiness plan. Phase 0 established the backend foundation, Phase 1 added deterministic readiness decisions, Phase 2A added a bounded provider-neutral agent, and Phase 2B adds focused per-operation reliability.
+**Not in production today.** See [Real-world usage](#real-world-usage).
 
-## Business problem
+## Problem statement
 
-Campaign teams often receive incomplete briefs spread across free-form text. Important budget, audience, compliance, channel, and measurement details can be missed before launch. The planned system will interpret a brief, execute narrow tools, apply deterministic business rules, and produce structured JSON plus a readable readiness summary with an observable decision trail.
+Campaign teams receive briefs that are incomplete, inconsistent or non-compliant: a missing objective, a budget that is negative or unusually high, an end date before the start date, a channel nobody supports, a lead campaign aimed at the EU without a privacy review. Catching this by hand before launch is slow and error-prone, and the cost of missing it is wasted spend or a policy breach.
 
-## Current scope
+BullsNexa turns a brief — structured or written in plain words — into a **checked, explainable launch-readiness decision** (`READY`, `NEEDS_REVIEW` or `BLOCKED`, with a 0–100 score), a launch plan when one is appropriate, and a full audit trail. When a person must decide, the system stops and asks.
 
-### Implemented — Phase 0
+## How it works
 
-- Strict TypeScript, ESM, and NodeNext compilation.
-- Fastify application factory and production server entry point.
-- `GET /health`, consistent 404 responses, centralized safe error handling, and request IDs.
-- Structured Pino logging with secret redaction and no request-body logging.
-- Vitest API and logging-security tests.
-- Optional Anthropic tool-use connectivity smoke test.
-- Multi-stage, non-root, Debian-slim Docker foundation.
-
-### Implemented — Phase 1
-
-- Zod contracts for partial and fully validated campaign briefs.
-- Structured objectives and KPI targets with deterministic compatibility rules.
-- Versioned synthetic rule configuration and policy references.
-- Pure `evaluateReadiness(brief, config, today)` evaluation with no network, database, clock, randomness, or LLM dependency.
-- Discriminated success/error contract that keeps technical evaluator failures separate from campaign business decisions.
-- Explainable 100-point scoring, structured issues/risks/questions, and `READY`, `NEEDS_REVIEW`, or `BLOCKED` status.
-- EU lead-generation privacy-review trigger using a versioned EU country-code list.
-- Fifteen evaluation fixtures: 8 executable domain cases and 7 explicitly deferred integration/security cases.
-- Unit, policy-consistency, boundary, and dataset-integrity tests.
-
-### Implemented — Phase 2A
-
-- A bounded plan/tool/replan loop with separate technical execution and business readiness statuses.
-- Strict provider actions, an authorized tool registry, zero-argument tool schemas, tool-call limits, planning-step limits, and repeated-action detection.
-- `checkCampaignFields`, which exposes existing Phase 1 issue codes, severities, missing/invalid fields, and clarification questions without scoring or assigning business status.
-- `evaluateCampaignReadiness`, which delegates business decisions exclusively to the existing Phase 1 evaluator.
-- A deterministic `MockProvider` whose next action depends on actual prior tool output. It simulates provider decisions; it is not genuine LLM reasoning.
-- In-memory execution traces and orchestrator-generated summaries grounded in verified results.
-
-### Implemented — Phase 2B
-
-- Configurable provider and tool timeouts, defaulting to 5 seconds per operation.
-- Cooperative `AbortSignal` propagation for timeouts and caller cancellation.
-- One retry by default, limited to explicitly classified transient failures on retry-safe providers or idempotent tools.
-- Attempt and duration metadata on provider/tool trace events.
-- Isolation of provider context and tool state snapshots so late results cannot update terminal agent state.
-
-### Planned
-
-- Natural-language brief extraction and real Claude provider integration.
-- An overall run deadline and stronger isolation for operations that ignore cancellation.
-- Persistence, human approval, a minimal UI, and broader end-to-end evaluations.
-
-### Not implemented
-
-The repository contains no natural-language extraction, real Claude agent provider, policy retrieval, database, approval workflow, frontend, advertising-platform integration, or ad publishing. Do not interpret the deterministic MockProvider, Anthropic smoke test, or evaluation fixtures as production AI automation.
-
-## Technology
-
-Node.js 24 LTS, npm, TypeScript, Fastify, Zod, Pino, Vitest, tsx, and the official Anthropic TypeScript SDK. Runtime code uses ES modules and NodeNext-compatible `.js` import specifiers so compiled output runs directly in Node.
-
-## Local setup
-
-Prerequisites: Node.js 24 and npm.
-
-```bash
-nvm use
-npm ci
-cp .env.example .env  # optional; only needed for the provider smoke test
-npm run dev
+```text
+free text (optional)                structured brief (JSON)
+        |                                   ^
+        v                                   |
+POST /api/extract  --draft brief-->  person reviews / edits
+ (one model tool call,                      |
+  every field re-validated)                 v
+                                     POST /api/runs
+                                            |
+                                            v
+                 +-------------- bounded agent loop --------------+
+                 |  model (Claude) or mock PROPOSES the next step |
+                 |        |                                       |
+                 |        v   backend validates, authorizes       |
+                 |  checkCampaignFields  -> missing/invalid fields |
+                 |  searchCampaignPolicies -> cited policy excerpts|
+                 |  evaluateCampaignReadiness -> deterministic rules|
+                 |  createLaunchPlan -> deterministic plan         |
+                 |  ask_user | finish | refuse                     |
+                 +-------------------------------------------------+
+                                            |
+                                            v
+         decision + summary + trace  ->  SQLite history
+                                            |
+                 NEEDS_REVIEW? --yes--> human Approve / Reject
+                                        (bound to a plan hash)
 ```
 
-The server defaults to `http://127.0.0.1:3000`. Override it with `HOST` and `PORT`. Production startup uses compiled JavaScript:
+**The core rule: the model proposes, the backend decides.** Status, score, summary, clarification questions, launch plan and handoff state are computed by deterministic code from validated data. A model can choose *which step comes next*; it cannot set a result, skip evaluation, or change campaign data.
+
+## Scope and non-scope
+
+**In scope**
+- One tool-using agent with explicit typed state and bounded execution (max steps, max tool calls, repeated-action detection, per-operation timeouts, one narrow retry).
+- Deterministic, versioned readiness rules and a synthetic policy library the agent can search.
+- Plain-text intake with human review before evaluation.
+- Run history, observable traces, and a human approval step for non-trivial decisions.
+- A minimal single-page UI and a small HTTP API.
+
+**Out of scope (not implemented)**
+- Publishing to any advertising platform, spending money, or any external side effect.
+- Authentication, users, roles, multi-tenancy.
+- Real client data, real legal or compliance guidance, real company policies.
+- Optimized budget allocation (the channel split is an equal-split placeholder).
+- A multi-agent system (see [Trade-offs](#trade-offs-and-decisions)).
+
+## Business cases
+
+1. **Agency brief intake.** Account managers check client briefs before handing them to channel teams; incomplete briefs come back with specific questions instead of failing later.
+2. **In-house launch gate.** A growth team applies the same budget, date, channel and privacy rules to every launch and keeps an auditable record of who approved exceptions.
+3. **Regulated brand approvals.** High-budget or EU lead-generation campaigns are routed to a named reviewer, and an approval is tied to the exact plan that was reviewed.
+
+## Quick start
+
+Prerequisites: Node.js 24 (the project targets 24 LTS; see [verification status](#verification)) and npm.
 
 ```bash
+npm ci
 npm run build
+AGENT_PROVIDER=simulated npm start      # offline, no API key needed
+```
+
+On Windows PowerShell:
+
+```powershell
+npm ci
+npm run build
+$env:AGENT_PROVIDER="simulated"
 npm start
 ```
 
-## API foundation
+Open <http://127.0.0.1:3000> for the home page and press **Open the app** (or go straight to <http://127.0.0.1:3000/app>). Text typed into the home page prompt is carried to the app in the URL fragment, which the browser never sends to the server. In the app, pick a sample brief (or describe a campaign in your own words and press **Extract fields**), press **Run agent**, inspect the verdict, score breakdown, launch plan and trace, and — for `NEEDS_REVIEW` runs — approve or reject. Recent runs are listed under the form.
 
-`GET /health` returns HTTP 200:
+### Provider modes
 
-```json
-{
-  "status": "ok",
-  "service": "bulls-nexa"
-}
-```
+`AGENT_PROVIDER` selects who proposes the next step. Business rules are identical in every mode.
 
-Unknown routes return HTTP 404 using the shared safe envelope:
+| Mode | What it is | Needs |
+| --- | --- | --- |
+| `mock` (default) | Deterministic rule-based provider. Not an LLM. | nothing |
+| `simulated` | Offline stand-in that speaks the real Anthropic `tool_use` protocol, including matching tool-call ids. Rule-based, **not an LLM**; results are labeled `simulated-claude`. | nothing |
+| `anthropic` | Live Claude through the Messages API with tool calling. No silent fallback: missing configuration is a clear 503/startup error. | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` |
 
-```json
-{
-  "error": {
-    "code": "NOT_FOUND",
-    "message": "Route not found"
-  },
-  "requestId": "generated-request-id"
-}
-```
+Copy `.env.example` to `.env` for the live mode. The key is never logged, returned, or sent to the model.
 
-The Phase 1 evaluator is currently a domain API, not an HTTP endpoint:
-
-```ts
-evaluateReadiness(brief, syntheticRulesConfig, "2026-01-15");
-```
-
-Valid evaluation returns `{ ok: true, decision }`, where the decision contains score components, validation issues, risks, clarification questions, policy references, rule version, human-review state, and business status. An invalid `today` returns `{ ok: false, error: { code: "INVALID_EVALUATION_DATE", message } }` with no score or business status.
-
-## Readiness model
-
-> **SYNTHETIC DEMO RULES — NOT OFFICIAL BULLS VISION GROUP POLICIES OR LEGAL GUIDANCE.**
-
-| Component | Maximum |
-| --- | ---: |
-| Campaign completeness | 40 |
-| Budget validity | 20 |
-| Synthetic policy compliance | 25 |
-| Measurable objective | 15 |
-| **Total** | **100** |
-
-Hard violations—invalid supplied budgets, reversed dates, or prohibited categories—produce `BLOCKED`. Equal start/end dates are valid single-day campaigns and receive all 5 date-policy points. Missing critical information produces clarification questions and `NEEDS_REVIEW`. Explicit review triggers, including high budgets, unsupported fields, past start dates, incompatible objective/KPI pairs, and EU lead-generation privacy review, produce `NEEDS_REVIEW` unless a blocker takes precedence. Otherwise, a score of at least 85 is `READY`; low score alone is never `BLOCKED`.
-
-Objectives are limited to `leads`, `sales`, `awareness`, `traffic`, and `app_installs`. KPI metrics and their allowed objective mappings are enumerated in the typed configuration. Country inputs use trimmed uppercase ISO alpha-2 codes; country names are not guessed.
-
-Supported objective, KPI, channel, and currency lists in the rules configuration are derived from the Zod enums. The KPI-to-objective mapping remains a policy-specific mapping and is covered by drift tests. Unsupported-channel issues name only the unsupported values in sorted order and tell callers to remove or replace them.
-
-See [docs/rubric.md](./docs/rubric.md) for exact weights, deductions, boundaries, and overlap rules. The runtime source of truth is [src/domain/rules-config.ts](./src/domain/rules-config.ts); synthetic policy documents provide reviewer context but cannot override typed rules.
-
-## Domain data flow
-
-```text
-structured partial brief + explicit rules + explicit today
-                 |
-                 +--> invalid today --> technical error (no decision)
-                 |
-                 v
-       field-level Zod validation
-                 |
-                 v
- deterministic rules and scoring
-                 |
-                 v
- status + score + issues + risks + clarification questions
-```
-
-## Phase 2A agent flow
-
-The agent accepts an already structured campaign brief and an explicit evaluation date. Provider output is treated as untrusted and validated as one of four strict actions: `CALL_TOOL`, `ASK_USER`, `FINISH`, or `REFUSE`.
-
-```text
-structured brief + explicit today
-              |
-              v
-       MockProvider decision
-              |
-              v
- checkCampaignFields ---- insufficient ----> clarification
-              |
-       sufficient or BLOCKER
-              v
- evaluateCampaignReadiness
-              |
-      decision or technical error
-              v
- orchestrator summary / safe failure
-```
-
-Both tools use the trusted brief and date held in agent state. Their argument schemas are strict empty objects, so a provider cannot replace the budget, dates, objective, policy configuration, or campaign data. The pre-check exposes the Phase 1 inspection findings but never computes a score or business status. `FINISH` is accepted only after a successful authoritative evaluation.
-
-`MockProvider` chooses the evaluator or clarification path from the actual `checkCampaignFields` result, including BLOCKER precedence. The orchestrator generates the final summary from verified domain data; provider prose is not authoritative.
-
-After building, generate three real synthetic traces (complete, incomplete, and controlled failure) with:
+### Docker
 
 ```bash
-node dist/agent/demo-traces.js
+docker build -t bulls-nexa .
+docker run --rm -p 3000:3000 -v bullsnexa-data:/app/var bulls-nexa
+curl http://127.0.0.1:3000/health
 ```
 
-Trace events contain correlation IDs, step, event type, tool name when applicable, outcome, sanitized error code, and attempt number. Measured `durationMs` is recorded only when a provider attempt or tool operation succeeds, fails, times out, or is cancelled; `TOOL_STARTED` does not claim an elapsed duration. Full campaign input is not copied into trace events. Trace and tool state are in memory only.
+**Docker has not been built or run by the author** (no Docker in the authoring environment); only a static test guards the Dockerfile. The image is multi-stage, runs as the non-root `node` user, and writes SQLite to `/app/var`.
 
-Each provider or tool attempt has its own finite timeout. Timeout aborts are cooperative: compatible handlers receive an `AbortSignal`, while `Promise.race`-style completion ensures the orchestrator stops waiting. This does not guarantee physical cancellation when an implementation ignores the signal. Such a late result cannot update terminal agent state because providers receive cloned context and tools execute against a cloned state snapshot, but an uncooperative operation could still perform its own external side effects.
+## Example inputs and expected outputs
 
-Retries are deliberately narrow. The default is one retry, and it applies only when an operation throws `TransientAgentOperationError` and the provider declares `retrySafe: true` or the tool declares `idempotent: true`. Timeouts, cancellation, ordinary exceptions, validation failures, unknown/unauthorized tools, malformed arguments, refusals, clarification, and business decisions are never retried. A future Anthropic provider must coordinate SDK-level and orchestrator retry counts to avoid duplicate requests.
+Sample briefs live in [`examples/briefs`](./examples/briefs) with expected outputs in [`examples/expected`](./examples/expected). `npm run examples` re-runs all of them (with a fixed evaluation date, so the outputs do not drift) and fails on any difference. The expected values agree with the independent expectations in `evals/campaign-cases.json`, and the test suite asserts the key outcomes by hand rather than trusting the stored files alone.
 
-Phase 2B implements no overall run deadline; only individual provider and tool attempts are bounded. An externally supplied signal can cancel the active operation, but distributed cancellation and worker isolation are out of scope.
+| Sample | Expected result |
+| --- | --- |
+| `01-ready-campaign` | `READY`, score 100, handoff `CLEARED`, launch plan available |
+| `02-high-budget-needs-review` | `NEEDS_REVIEW`, 100, risk `HIGH_BUDGET_REVIEW`, handoff `PENDING_APPROVAL` |
+| `03-eu-leads-privacy-review` | `NEEDS_REVIEW`, 97, risk `EU_LEADS_PRIVACY_REVIEW` |
+| `04-blocked-negative-budget` | `BLOCKED`, 80, risk `INVALID_BUDGET`, handoff `NOT_ELIGIBLE`, no plan |
+| `05-incomplete-needs-clarification` | `WAITING_FOR_CLARIFICATION`, no score; asks for objective, country, budget, currency, dates, KPI |
+| `06-prompt-injection-in-notes` | injection in `additionalNotes` ignored; `NEEDS_REVIEW` (not `READY`) |
+| `free-text/summer-sandals.txt` | extracted into a draft brief, then `READY`, 100 |
+
+Run one yourself (server running, `curl` on bash; PowerShell users can use the UI or `Invoke-RestMethod`):
+
+```bash
+curl -s -X POST http://127.0.0.1:3000/api/runs \
+  -H 'content-type: application/json' \
+  -d "{\"brief\": $(cat examples/briefs/02-high-budget-needs-review.json)}"
+```
+
+Abridged real response (`AGENT_PROVIDER=mock`; the full response also carries the whole brief-derived decision, issues, plan checklist, run id and trace ids):
+
+```json
+{
+  "executionStatus": "COMPLETED",
+  "businessStatus": "NEEDS_REVIEW",
+  "summary": "Campaign NEEDS_REVIEW: The valid budget exceeds the synthetic human-review threshold.",
+  "decision": {
+    "score": 100,
+    "scoreBreakdown": {
+      "completeness": { "score": 40, "maximum": 40 },
+      "budget": { "score": 20, "maximum": 20 },
+      "policyCompliance": { "score": 25, "maximum": 25 },
+      "measurableObjective": { "score": 15, "maximum": 15 },
+      "total": 100
+    },
+    "risks": [{ "code": "HIGH_BUDGET_REVIEW", "level": "MEDIUM", "policyRef": "BUDGET_POLICY_V1" }],
+    "requiresHumanReview": true,
+    "rulesVersion": "1.0.0"
+  },
+  "handoff": { "status": "PENDING_APPROVAL", "approvalRequired": true },
+  "launchPlan": {
+    "schedule": { "startDate": "2027-01-10", "endDate": "2027-02-10", "durationDays": 32 },
+    "budget": {
+      "total": 150000,
+      "dailyBudget": 4687.5,
+      "channels": [
+        { "channel": "search", "amount": 75000, "sharePercent": 50 },
+        { "channel": "social", "amount": 75000, "sharePercent": 50 }
+      ]
+    }
+  },
+  "provider": { "mode": "mock" },
+  "persisted": true
+}
+```
+
+The response also lists the trace: `AGENT_STARTED`, then for each tool `ACTION_PROPOSED` → `TOOL_STARTED` → `TOOL_SUCCEEDED` (with `durationMs` and `attempt`), and finally `AGENT_COMPLETED`.
+
+> The sample dates are in 2027. A start date in the past is itself a review trigger, so after those dates pass, live runs of the samples will change; `npm run examples` is unaffected because it uses a fixed date.
+
+## Architecture
+
+| Area | Path | Responsibility |
+| --- | --- | --- |
+| Domain | `src/domain` | Zod contracts, versioned rules, pure `evaluateReadiness`, pure `createLaunchPlan`. No network, clock, randomness or model. |
+| Agent | `src/agent` | Orchestrator loop, tool registry, providers (mock, Anthropic, simulated), policy search, reliability (timeouts, retry), free-text extraction. |
+| Approval | `src/approval` | Handoff rule and plan-hash approval integrity. |
+| Persistence | `src/persistence` | SQLite (Node's built-in `node:sqlite`): runs, trace events, approvals. |
+| HTTP | `src/routes`, `src/app.ts` | Fastify routes, validation, safe error envelope, request ids. |
+| UI | `public/index.html` (home), `public/app.html` (tool) | Single files, no framework, no external resources, text-only DOM writes, strict CSP. |
+| Evaluation | `src/eval`, `evals`, `examples` | 15-case agent evaluation, fault injection, sample inputs/outputs. |
+
+### Agent design
+
+- **State.** Typed `AgentState` holds the trusted brief, evaluation date, tool results and trace. The model never receives a way to alter it: tool arguments are strict empty schemas (the policy search takes only a short query string), so budgets, dates and campaign data cannot be supplied by the model.
+- **Planning.** At each step the provider proposes exactly one action (`CALL_TOOL`, `ASK_USER`, `FINISH`, `REFUSE`). The orchestrator validates it against a strict schema, checks the tool exists and is authorized, runs it with a timeout, and feeds the real result back.
+- **Statuses are separate.** Technical execution (`COMPLETED`, `WAITING_FOR_CLARIFICATION`, `FAILED`, `REFUSED`, …) is distinct from the business decision (`READY`, `NEEDS_REVIEW`, `BLOCKED`). A failed run never yields a made-up decision.
+- **Ordering rules enforced by code.** `FINISH` is accepted only after a successful evaluation; the launch plan needs an evaluation first; a blocker still goes through evaluation so it is recorded; clarification questions come from the trusted field check, not from the model.
+- **Tools.** Four business tools (`checkCampaignFields`, `searchCampaignPolicies`, `evaluateCampaignReadiness`, `createLaunchPlan`) and three control actions (`ask_user`, `finish`, `refuse`). Control actions do not count against the business tool limit (default 4).
+
+### Trust boundaries (prompt hygiene)
+
+- The brief, free text, tool results and policy excerpts are **untrusted data**. They are sent to the model as bounded, escaped JSON between delimiters, never inside instructions, and the system prompt tells the model to ignore instructions found in them.
+- Even if a model obeys an injection, the backend still computes every result. This is tested: with an obedient scripted model, injected text cannot change status, skip evaluation, force `FINISH`, or smuggle fields through extraction.
+- Policy search reads only the five configured policy files from a root derived from the module location (not the working directory); the model controls only a bounded query string.
+- Logs contain identifiers, statuses and timings, never the brief; secrets are redacted.
+
+### Reliability
+
+| Concern | Behavior |
+| --- | --- |
+| Timeouts | Per operation; 5 s default, 25 s for the live provider, 20 s for extraction. `AbortSignal` is propagated. A late result cannot change a finished run. |
+| Retries | One, only for explicitly transient failures (rate limit, connection, 5xx) on retry-safe providers or idempotent tools. Auth and invalid-request errors are never retried. SDK retries are disabled so counts do not multiply. |
+| Limits | Maximum planning steps and tool calls, repeated-action protection. |
+| Bad model output | Text without a tool call, extra or wrong fields, unknown or unauthorized tools, multiple tool calls: controlled failure, no decision. |
+| Storage failure | The decision is still returned, flagged `persisted: false`. |
+| Cost | `max_tokens` 512 (agent) / 700 (extraction); actual token usage from the API is summed per run and never estimated. Offline modes report none. |
+
+## Approval and observability
+
+- Every run is stored: brief, decision, per-step trace with latency and attempt number, token usage (live mode only), total duration. `GET /api/runs` and `GET /api/runs/:id` expose them.
+- Handoff is a deterministic rule: `BLOCKED` → `NOT_ELIGIBLE` (cannot be approved); `NEEDS_REVIEW` or evaluator-flagged → `PENDING_APPROVAL`; otherwise `CLEARED`.
+- An approval must carry the SHA-256 `planHash` of the brief, decision and launch plan the reviewer saw. A stale hash is rejected, a second decision is rejected, and an approval stops counting (`APPROVAL_INVALIDATED`) if the stored plan no longer matches.
+- **There is no authentication**: the reviewer name is a free-text label, not an audit-grade identity.
+
+## API
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /` | Home page. |
+| `GET /app` | The working tool (single-page UI). |
+| `GET /health` | Liveness. |
+| `GET /api/config` | Provider mode and the evaluation date in use. |
+| `POST /api/extract` `{ text }` | Free text → draft brief, field lists, notice to review. |
+| `POST /api/runs` `{ brief }` | Run the agent; returns decision, summary, trace, handoff, launch plan, plan hash. |
+| `GET /api/runs` | Last 20 runs. |
+| `GET /api/runs/:id` | One run with trace, plan and approval. |
+| `POST /api/runs/:id/approval` | `{ decision, reviewer, comment?, planHash }`. |
+
+Errors share one envelope, `{ "error": { "code", "message" }, "requestId" }`, with 400 (invalid input), 404, 409 (approval conflicts), 413 (body too large), 503 (live provider not configured) and 504/502 (extraction timeout/provider error). Body limits: 32 KB runs, 16 KB extract, 4 KB approval.
+
+## Configuration
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `AGENT_PROVIDER` | `mock` | `mock`, `simulated` or `anthropic`. |
+| `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | – | Required only for `anthropic`. `.env.example` suggests `claude-haiku-5-5`. |
+| `DATABASE_PATH` | `var/bullsnexa.sqlite` | SQLite file (git-ignored). |
+| `HOST`, `PORT` | `127.0.0.1`, `3000` | Listen address. |
 
 ## Verification
 
 ```bash
-npm run typecheck
-npm test
+npm run typecheck     # strict TypeScript
+npm test              # unit, integration and end-to-end tests (offline)
 npm run build
+npm run eval          # 15 evaluation cases through the real agent, offline
+npm run examples      # sample inputs vs expected outputs
+npm run demo:agent    # printed traces: mock, simulated Claude, failure, injection
 ```
 
-Tests use `Fastify.inject()` for HTTP behavior and local pure functions for the domain and agent layers. They cover schemas, business rules, score boundaries, dataset integrity, planning, strict validation, authorization, bounded execution, provider/tool timeouts, cancellation, safe retries, late-result isolation, deterministic summaries, and traces. The seven future integration cases remain schema-validated fixtures and are not counted as passing agent tests.
+The Phase 6 runner invokes the agent for all 15 dataset cases. Cases 01–08 are deterministic business workflows, cases 09–14 exercise dedicated fault and security scenarios, and case 15 combines agent execution with approval-integrity checks. The `executionScope` and `expectedOutcome` values for cases 09–15 remain historical Phase 1 metadata, when those cases were deferred; they do not describe their current Phase 6 execution status. Not all 15 cases are complete HTTP end-to-end tests—the separate end-to-end test covers free-text extraction, agent execution, approval, and history through the HTTP API.
 
-For real requests, a future application boundary or orchestrator must supply `today`; the evaluator never substitutes or reads the system date.
+All tests are offline and deterministic (explicit dates, scripted or simulated providers). What they cover: domain rules and score boundaries; the agent loop, strict action validation, authorization, limits, timeouts, cancellation, retries and late-result isolation; the Anthropic tool-use protocol with a scripted client (matching tool-call ids, retries, malformed responses, token accounting); policy retrieval independent of the working directory; free-text extraction; persistence and approval integrity; the HTTP API; the 15-case evaluation (prompt injection in the brief and in policy text, missing policy sources, tool timeout, malformed model output, unauthorized tool, plan changed after approval); an end-to-end flow from free text to approval; and a static check of the Dockerfile.
 
-## Optional Anthropic smoke test
+### Verification status
 
-Copy `.env.example` to `.env` and provide both values only when live provider verification is explicitly intended:
+| Item | Status |
+| --- | --- |
+| Current publication verification on Node 25.6.1 (Windows) | Typecheck and build passed; 17 files / 225 tests, `eval` 15/15, and `examples` 7/7 passed. Node 25 is outside the declared `>=24 <25` engine range. |
+| Earlier verification on Node 22.23.4 (Linux) | 17 files / 213 tests, `eval` 15/15, and all examples passed before the final reliability fixes. |
+| Node 24 LTS (the stated target) | **Not verified.** |
+| Live Claude, one smoke run (`AGENT_PROVIDER=anthropic`, `npm run smoke:agent`, 2026-11-12, author's Windows machine) | **PASS.** One run on the sample complete brief: `COMPLETED`, `READY`, score 100, tools `checkCampaignFields` then `evaluateCampaignReadiness`, 3 provider requests, 6199 input / 55 output tokens. This is a single run, not a quality or robustness evaluation; behavior on other briefs, on injection attempts and on live free-text extraction is covered only by the scripted-protocol tests. |
+| Extraction quality on messy real text | **Not verified.** Tests use a rule-based simulator and scripted responses. |
+| Docker build and run | **Not verified.** |
+| UI in multiple browsers | Seen in one browser only. |
 
-```dotenv
-ANTHROPIC_API_KEY=
-ANTHROPIC_MODEL=claude-haiku-5-5
-```
+Current counts on Node 25.6.1: 17 test files, 225 tests; `npm run eval` 15/15; `npm run examples` 7/7. Node 24 remains unverified.
 
-```bash
-npm run smoke:anthropic
-```
+To check live behavior yourself: put a key and model in `.env`, set `AGENT_PROVIDER=anthropic`, run `npm run smoke:agent` (one short run; prints status, tools and token usage only, never the key).
 
-The smoke test is separate from the agent and test suite. Automated domain and agent tests use no Anthropic credentials or network access.
+## Trade-offs and decisions
 
-## Docker
+- **One agent, not a multi-agent system.** The task is a short, safety-critical pipeline where deterministic code must stay authoritative. Splitting it across agents would add coordination failure modes without adding capability. The tool registry, typed state and provider interface are the seams where further agents could be added (for example a separate review-summarizer), but nothing here pretends to be multi-agent.
+- **No agent framework.** A small bounded loop is easier to test, bound and explain than a graph runtime for four tools; the provider interface keeps the model swappable.
+- **LLM at the edges only.** Claude chooses the next step and (optionally) drafts a brief from text. It never produces the decision. This costs flexibility and buys auditability.
+- **Human review of extraction.** Misreading free text is the highest-risk model step, so a person confirms the draft before anything is evaluated, and the evaluator re-checks every field.
+- **`node:sqlite` instead of a native package.** No build toolchain or prebuilt-binary risk; the cost is that the module is still marked experimental and prints a warning.
+- **Simulated providers.** They make the whole product demoable and testable offline, and are labeled everywhere so they cannot be mistaken for a model.
+- **Equal-split budget placeholder.** An optimized split would be an unverified claim, so the plan says plainly that it is a placeholder.
+- **Synthetic rules.** Thresholds and policies are demonstration values in versioned config, not business advice.
 
-The multi-stage image compiles in a Debian build stage containing Python, Make, and a C++ compiler so a future native dependency such as `better-sqlite3` can be installed. The final Debian-slim image runs as the existing non-root `node` user and binds to `0.0.0.0`.
+## Limitations
 
-```bash
-docker build -t bulls-nexa .
-docker run --rm -p 3000:3000 bulls-nexa
-```
+- Live Claude was verified with one smoke run only; Docker and Node 24 are unverified (see above).
+- No authentication or authorization; approvals are not audit-grade.
+- The country check validates the alpha-2 format only; it does not ship a full country registry.
+- The offline extractor understands simple English and ISO dates only.
+- No overall run deadline; an operation that ignores `AbortSignal` is abandoned, not physically stopped.
+- SQLite data is local to the process or volume; there is no migration tooling, retention policy or backup.
+- No rate limiting on the HTTP API.
+- The launch plan is a synthetic hand-off document; nothing is sent to any platform.
 
-Docker remains **NOT VERIFIED** in this workspace because the Docker CLI is unavailable. No successful image build or container health check is claimed.
+## Next steps
+
+1. Run the evaluation cases and live free-text extraction against real Claude and measure token cost and latency across them (only one smoke run exists so far).
+2. Authentication, roles and per-user approval authority.
+3. Evaluate extraction on real, messy briefs, including non-English text.
+4. Exportable reports and a change-and-resubmit flow for corrected briefs.
+5. Metrics and alerting around run outcomes, latency and token usage.
+6. A managed database, migrations and a retention policy.
 
 ## Real-world usage
 
-**Not in production today.** Plausible users include a marketing agency checking client briefs before channel handoff, an in-house growth team standardizing launch gates, and a regulated brand preparing auditable approval packets. Production deployment would require authenticated access, secret management, tenant isolation, controlled business data, monitoring, retention rules, human approval for consequential actions, compliance/legal review, and ongoing model and rule evaluation.
+**Not in production today.** BullsNexa has not been used with any business or real client data.
 
-## Limitations and roadmap
+Realistic users:
+- **A marketing or performance agency** checking client briefs before channel handoff.
+- **An in-house growth team** standardizing launch gates and keeping an approval record.
+- **A regulated brand** (finance, health, EU-facing lead generation) that needs documented review of high-risk campaigns.
 
-- Verification currently uses Node 25.6.1 while the project targets Node 24 LTS; Node 24 remains unverified in this environment.
-- Phase 2B accepts structured input only; free-text extraction and ambiguity resolution are future integrations.
-- The country validator enforces the documented alpha-2 format but does not ship a complete ISO country registry.
-- The rules and policy documents are synthetic demonstration material, not business or legal guidance.
-- The agent uses deterministic MockProvider decisions, not genuine LLM reasoning; real Claude tool calling is not implemented.
-- There is no overall run deadline. Per-operation timeouts cannot physically stop code that ignores `AbortSignal`; worker isolation is not implemented.
-- Persistence, approval workflows, and UI remain future work.
+What productionizing would require:
+- **Security:** authentication, authorization and tenant isolation; secret management; rate limiting; dependency and prompt-injection review against real data.
+- **Data access:** real campaign and policy sources with access control instead of synthetic files, and a decision on what may be sent to a model provider.
+- **Monitoring:** metrics, alerting and cost tracking on top of the existing traces; model and rules evaluation on an ongoing basis.
+- **Human-in-the-loop:** verified reviewer identity, escalation paths and an immutable audit log.
+- **Compliance:** legal review of the real policies encoded as rules, data retention and privacy obligations, and sign-off before any automated action reaches an ad platform.
 
-See [ENGINEERING_LOG.md](./ENGINEERING_LOG.md) for the phase-by-phase engineering record.
+## Repository layout
+
+```text
+src/domain        rules, schemas, evaluator, launch plan
+src/agent         orchestrator, tools, providers, extraction, policy search
+src/approval      handoff and plan-hash integrity
+src/persistence   SQLite run store
+src/routes        HTTP routes
+src/eval          15-case agent evaluation
+src/examples      example runner
+public            home page (index.html) and tool UI (app.html)
+data/synthetic-policies   five synthetic policy documents
+evals             evaluation dataset
+examples          sample inputs and expected outputs
+tests             all tests (offline)
+docs/rubric.md    exact scoring rubric
+ENGINEERING_LOG.md   phase-by-phase record of decisions and verification
+```
+
+See [ENGINEERING_LOG.md](./ENGINEERING_LOG.md) for the chronological build record and [docs/rubric.md](./docs/rubric.md) for the scoring rules. The log is historical: statements in earlier phases describe the project at that time.

@@ -22,6 +22,7 @@ function successfulOutput<T>(
 }
 
 export class MockProvider implements AgentProvider {
+  readonly mode = "mock";
   readonly retrySafe = true;
 
   async decideNextAction(

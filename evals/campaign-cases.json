@@ -1,6 +1,10 @@
 {
   "version": "1.0.0",
   "today": "2026-01-15",
+  "metadataNotes": {
+    "phase1": "executionScope and expectedOutcome preserve the original Phase 1 dataset classification: cases 01-08 were executable domain cases, while cases 09-15 were FUTURE_INTEGRATION_CASE entries with NOT_EXECUTED outcomes.",
+    "phase6": "The Phase 6 runner now executes all 15 cases. Cases 01-08 are deterministic business workflows, cases 09-14 are fault and security scenarios, and case 15 invokes the agent before checking approval integrity. These Phase 6 executions do not change the historical Phase 1 metadata, and they are not all complete HTTP end-to-end tests."
+  },
   "cases": [
     {
       "id": "case-01-valid-campaign",

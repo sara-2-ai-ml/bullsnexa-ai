@@ -1,14 +1,17 @@
 import { z } from "zod";
 
 import { buildApp } from "./app.js";
+import { createRunStore } from "./persistence/run-store.js";
 
 const runtimeSchema = z.object({
   HOST: z.string().min(1).default("127.0.0.1"),
+  DATABASE_PATH: z.string().min(1).default("var/bullsnexa.sqlite"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
 });
 
 async function start(): Promise<void> {
-  const app = buildApp();
+  const config = runtimeSchema.parse(process.env);
+  const app = buildApp({ store: createRunStore(config.DATABASE_PATH) });
 
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
     app.log.info({ signal }, "Shutdown requested");
@@ -25,7 +28,6 @@ async function start(): Promise<void> {
   process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
   try {
-    const config = runtimeSchema.parse(process.env);
     await app.listen({ host: config.HOST, port: config.PORT });
   } catch (error) {
     app.log.fatal({ err: error }, "Application startup failed");
@@ -34,4 +36,7 @@ async function start(): Promise<void> {
   }
 }
 
-void start();
+start().catch((error: unknown) => {
+  console.error("Startup failed:", error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});

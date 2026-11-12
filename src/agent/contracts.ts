@@ -103,8 +103,20 @@ export type ExecutionEvent = z.infer<typeof ExecutionEventSchema>;
 export type ToolResultRecord = z.infer<typeof ToolResultRecordSchema>;
 export type AgentState = z.infer<typeof AgentStateSchema>;
 
+export interface ProviderUsage {
+  readonly requests: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+}
+
+export interface AgentProviderMetadata {
+  readonly mode: string;
+  readonly usage?: ProviderUsage;
+}
+
 export interface AgentResult extends AgentState {
   readonly summary: string;
+  readonly provider?: AgentProviderMetadata;
 }
 
 export interface ProviderContext {
@@ -121,9 +133,15 @@ export interface ProviderContext {
 }
 
 export interface AgentProvider {
+  /** Identifies the provider in result metadata, e.g. "mock" or "anthropic". */
+  readonly mode?: string;
+  /** Provider-specific timeout used when the caller does not set one. */
+  readonly defaultTimeoutMs?: number;
   readonly retrySafe?: boolean;
   decideNextAction(
     context: ProviderContext,
     signal: AbortSignal,
   ): Promise<AgentAction>;
+  /** Token usage actually reported by the provider, when it has any. */
+  usage?(): ProviderUsage;
 }

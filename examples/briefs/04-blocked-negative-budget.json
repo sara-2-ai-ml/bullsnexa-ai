@@ -1,0 +1,13 @@
+{
+  "campaignName": "Synthetic Broken Budget",
+  "objective": "sales",
+  "targetAudience": "Synthetic retail audience",
+  "targetCountry": "US",
+  "channels": ["social"],
+  "budgetAmount": -500,
+  "currency": "USD",
+  "startDate": "2027-03-01",
+  "endDate": "2027-03-31",
+  "targetKpi": { "metric": "purchases", "targetValue": 100 },
+  "category": "retail"
+}

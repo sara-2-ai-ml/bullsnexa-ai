@@ -10,10 +10,14 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/server.js",
+    "start": "node --env-file-if-exists=.env dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "smoke:anthropic": "node --env-file-if-exists=.env scripts/smoke-anthropic.ts"
+    "smoke:anthropic": "node --env-file-if-exists=.env scripts/smoke-anthropic.ts",
+    "eval": "npm run build && node dist/eval/run-evals.js",
+    "examples": "npm run build && node dist/examples/run-examples.js",
+    "demo:agent": "npm run build && node dist/agent/demo-traces.js",
+    "smoke:agent": "npm run build && node --env-file-if-exists=.env dist/agent/smoke-live.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",

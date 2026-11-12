@@ -1,0 +1,13 @@
+{
+  "campaignName": "Synthetic Germany Lead Drive",
+  "objective": "leads",
+  "targetAudience": "Synthetic small-business owners",
+  "targetCountry": "DE",
+  "channels": ["search", "email"],
+  "budgetAmount": 18000,
+  "currency": "EUR",
+  "startDate": "2027-04-05",
+  "endDate": "2027-05-05",
+  "targetKpi": { "metric": "leads", "targetValue": 400 },
+  "category": "software"
+}

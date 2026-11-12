@@ -1,0 +1,18 @@
+{
+  "example": "03-eu-leads-privacy-review",
+  "today": "2026-11-12",
+  "executionStatus": "COMPLETED",
+  "businessStatus": "NEEDS_REVIEW",
+  "score": 97,
+  "handoff": "PENDING_APPROVAL",
+  "tools": [
+    "checkCampaignFields",
+    "evaluateCampaignReadiness"
+  ],
+  "clarificationFields": [],
+  "risks": [
+    "EU_LEADS_PRIVACY_REVIEW"
+  ],
+  "launchPlan": "AVAILABLE",
+  "summary": "Campaign NEEDS_REVIEW: The synthetic rules require privacy review for lead-generation campaigns targeting an EU country."
+}

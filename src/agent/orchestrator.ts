@@ -49,6 +49,9 @@ export interface RunAgentOptions {
   readonly signal?: AbortSignal;
 }
 
+/** Three business tools plus one spare call for a bounded re-check. */
+export const DEFAULT_MAX_TOOL_CALLS = 4;
+
 const positiveIntegerSchema = z.number().int().finite().positive();
 const nonnegativeIntegerSchema = z.number().int().finite().nonnegative();
 
@@ -243,7 +246,7 @@ function toolTerminalError(
   };
 }
 
-export async function runCampaignAgent(
+async function executeCampaignRun(
   options: RunAgentOptions,
 ): Promise<AgentResult> {
   const config = options.config ?? syntheticRulesConfig;
@@ -251,9 +254,11 @@ export async function runCampaignAgent(
   const maxPlanningSteps = positiveIntegerSchema.parse(
     options.maxPlanningSteps ?? 6,
   );
-  const maxToolCalls = positiveIntegerSchema.parse(options.maxToolCalls ?? 2);
+  const maxToolCalls = positiveIntegerSchema.parse(options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS);
   const providerTimeoutMs = positiveIntegerSchema.parse(
-    options.providerTimeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
+    options.providerTimeoutMs ??
+      options.provider.defaultTimeoutMs ??
+      DEFAULT_PROVIDER_TIMEOUT_MS,
   );
   const toolTimeoutMs = positiveIntegerSchema.parse(
     options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
@@ -505,6 +510,7 @@ export async function runCampaignAgent(
               state: structuredClone(state),
               config: structuredClone(config),
               signal,
+              input: parsedArguments.data,
             }),
           timeoutMs: toolTimeoutMs,
           ...(options.signal ? { externalSignal: options.signal } : {}),
@@ -587,4 +593,18 @@ export async function runCampaignAgent(
     code: "MAX_PLANNING_STEPS_EXCEEDED",
     message: "The agent reached its configured planning-step limit.",
   });
+}
+
+export async function runCampaignAgent(
+  options: RunAgentOptions,
+): Promise<AgentResult> {
+  const outcome = await executeCampaignRun(options);
+  const usage = options.provider.usage?.();
+  return {
+    ...outcome,
+    provider: {
+      mode: options.provider.mode ?? "custom",
+      ...(usage ? { usage } : {}),
+    },
+  };
 }
