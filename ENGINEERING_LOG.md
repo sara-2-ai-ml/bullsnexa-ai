@@ -274,3 +274,21 @@ Verification on 2026-11-12 used Node 25.6.1, outside the declared Node 24 target
 **Not in production today.** Natural-language extraction, a real Claude provider, persistence, advanced retry/deadline behavior, human approval, frontend, and advertising-platform integrations remain future work.
 
 Phase 2A stops here pending review.
+
+## Phase 2B — Focused agent reliability
+
+Phase 2B extends the existing orchestrator rather than replacing it. Provider decisions and registered tool executions now run behind configurable, finite per-operation boundaries. Both default to 5 seconds. The orchestrator passes an `AbortSignal` into compatible providers and tools and accepts an optional caller signal for cooperative cancellation.
+
+Timeout or cancellation ends the orchestrator's wait and produces a structured technical `FAILED` result. It never produces `BLOCKED`, `NEEDS_REVIEW`, a readiness score, or a fabricated decision. Providers already receive cloned context; tools now receive cloned state and rule configuration snapshots. Therefore a promise resolving after timeout cannot update terminal agent state. Promise-level timeout does not physically terminate an implementation that ignores its signal, so external side effects from uncooperative code remain a limitation.
+
+The default retry allowance is one additional attempt. A retry occurs only when the operation explicitly throws `TransientAgentOperationError` and separately declares retry safety: `retrySafe: true` for a provider or `idempotent: true` for a tool. Timeouts and cancellation are not retried because completion may be uncertain. Ordinary failures, invalid provider output, unknown/unauthorized tools, invalid arguments, refusals, clarification paths, and legitimate business decisions are also not retried. Future Anthropic integration must coordinate SDK and orchestrator retry policies so one logical decision does not receive duplicated retry layers.
+
+Existing trace event types were preserved. Provider outcomes plus `TOOL_SUCCEEDED` and `TOOL_FAILED` carry measured `durationMs`; `TOOL_STARTED` carries only its attempt because no elapsed duration exists yet. Failed attempts record a sanitized classification. Timers and external abort listeners are removed when each attempt settles.
+
+Focused tests cover provider timeout, cooperative tool timeout, late tool resolution, caller cancellation, provider and tool transient recovery, retry exhaustion, ordinary non-transient failure, non-idempotent no-retry behavior, validation/unknown-tool no-retry behavior, and unchanged Phase 2A complete, incomplete, and blocked paths.
+
+Verification on 2026-11-12 used Node 25.6.1, outside the declared Node 24 target. Typecheck passed, all 8 test files and 104 tests passed, and the production build passed. No domain scoring or dependency files changed. No Anthropic request, dependency installation/update, staging, commit, or push occurred during Phase 2B.
+
+There is intentionally no overall run deadline, distributed cancellation, worker isolation, persistence, real Claude provider, database, UI, approval endpoint, or advertising integration. **Not in production today.**
+
+Phase 2B stops here pending review.

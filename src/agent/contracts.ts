@@ -66,6 +66,8 @@ export const ExecutionEventSchema = z
     toolName: z.string().min(1).optional(),
     outcome: z.string().min(1),
     errorCode: z.string().min(1).optional(),
+    durationMs: z.number().int().nonnegative().optional(),
+    attempt: z.number().int().positive().optional(),
   })
   .strict();
 
@@ -119,5 +121,9 @@ export interface ProviderContext {
 }
 
 export interface AgentProvider {
-  decideNextAction(context: ProviderContext): Promise<AgentAction>;
+  readonly retrySafe?: boolean;
+  decideNextAction(
+    context: ProviderContext,
+    signal: AbortSignal,
+  ): Promise<AgentAction>;
 }

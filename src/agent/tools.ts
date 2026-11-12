@@ -15,6 +15,7 @@ export const EVALUATE_CAMPAIGN_READINESS = "evaluateCampaignReadiness";
 export interface ToolExecutionContext {
   readonly state: Readonly<AgentState>;
   readonly config: SyntheticRulesConfig;
+  readonly signal: AbortSignal;
 }
 
 export interface AgentToolDefinition {
@@ -22,6 +23,7 @@ export interface AgentToolDefinition {
   readonly description: string;
   readonly inputSchema: ZodType<Record<string, never>>;
   readonly authorized: boolean;
+  readonly idempotent: boolean;
   execute(context: ToolExecutionContext): Promise<unknown>;
 }
 
@@ -43,7 +45,9 @@ export function createDefaultToolRegistry(): ToolRegistry {
         "Inspect the trusted structured campaign brief using Phase 1 validation issues.",
       inputSchema: noArgumentsSchema,
       authorized: true,
-      async execute({ state, config }): Promise<CheckCampaignFieldsResult> {
+      idempotent: true,
+      async execute({ state, config, signal }): Promise<CheckCampaignFieldsResult> {
+        signal.throwIfAborted();
         return inspectCampaignBrief(state.currentBrief, config, state.today);
       },
     },
@@ -53,7 +57,9 @@ export function createDefaultToolRegistry(): ToolRegistry {
         "Evaluate the trusted structured campaign brief with the authoritative Phase 1 engine.",
       inputSchema: noArgumentsSchema,
       authorized: true,
-      async execute({ state, config }): Promise<EvaluateCampaignReadinessResult> {
+      idempotent: true,
+      async execute({ state, config, signal }): Promise<EvaluateCampaignReadinessResult> {
+        signal.throwIfAborted();
         return {
           evaluation: evaluateReadiness(
             state.currentBrief,

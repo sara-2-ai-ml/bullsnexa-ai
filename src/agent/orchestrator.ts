@@ -20,6 +20,13 @@ import {
   type ProviderContext,
 } from "./contracts.js";
 import {
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_PROVIDER_TIMEOUT_MS,
+  DEFAULT_TOOL_TIMEOUT_MS,
+  OperationAttemptFailure,
+  runOperationAttempt,
+} from "./reliability.js";
+import {
   CHECK_CAMPAIGN_FIELDS,
   EVALUATE_CAMPAIGN_READINESS,
   createDefaultToolRegistry,
@@ -36,9 +43,14 @@ export interface RunAgentOptions {
   readonly toolRegistry?: ToolRegistry;
   readonly maxPlanningSteps?: number;
   readonly maxToolCalls?: number;
+  readonly providerTimeoutMs?: number;
+  readonly toolTimeoutMs?: number;
+  readonly maxRetries?: number;
+  readonly signal?: AbortSignal;
 }
 
-const positiveIntegerSchema = z.number().int().positive();
+const positiveIntegerSchema = z.number().int().finite().positive();
+const nonnegativeIntegerSchema = z.number().int().finite().nonnegative();
 
 export function initializeAgentState(
   brief: unknown,
@@ -149,6 +161,88 @@ function latestFieldInspection(
     )?.output as CheckCampaignFieldsResult | undefined;
 }
 
+function canRetry(
+  failure: OperationAttemptFailure,
+  retrySafe: boolean,
+  attempt: number,
+  maxRetries: number,
+): boolean {
+  return (
+    failure.transient &&
+    failure.boundary === undefined &&
+    retrySafe &&
+    attempt <= maxRetries
+  );
+}
+
+function providerTerminalError(
+  failure: OperationAttemptFailure,
+  retrySafe: boolean,
+): AgentError {
+  if (failure.boundary === "timeout") {
+    return {
+      code: "PROVIDER_TIMEOUT",
+      message: "The provider exceeded the per-operation timeout.",
+    };
+  }
+  if (failure.boundary === "cancellation") {
+    return {
+      code: "PROVIDER_CANCELLED",
+      message: "The provider operation was cancelled.",
+    };
+  }
+  if (failure.transient) {
+    if (!retrySafe) {
+      return {
+        code: "PROVIDER_TRANSIENT_FAILURE_NOT_RETRIED",
+        message: "The transient provider failure was not safe to retry.",
+      };
+    }
+    return {
+      code: "PROVIDER_RETRY_EXHAUSTED",
+      message: "The provider exhausted its bounded transient retry budget.",
+    };
+  }
+  return {
+    code: "PROVIDER_FAILURE",
+    message: "The provider could not produce a next action.",
+  };
+}
+
+function toolTerminalError(
+  failure: OperationAttemptFailure,
+  idempotent: boolean,
+): AgentError {
+  if (failure.boundary === "timeout") {
+    return {
+      code: "TOOL_TIMEOUT",
+      message: "The authorized tool exceeded the per-operation timeout.",
+    };
+  }
+  if (failure.boundary === "cancellation") {
+    return {
+      code: "TOOL_CANCELLED",
+      message: "The authorized tool operation was cancelled.",
+    };
+  }
+  if (failure.transient) {
+    if (!idempotent) {
+      return {
+        code: "TOOL_TRANSIENT_FAILURE_NOT_RETRIED",
+        message: "The transient tool failure was not safe to retry.",
+      };
+    }
+    return {
+      code: "TOOL_RETRY_EXHAUSTED",
+      message: "The authorized tool exhausted its bounded transient retry budget.",
+    };
+  }
+  return {
+    code: "TOOL_EXECUTION_FAILURE",
+    message: "The authorized tool failed during execution.",
+  };
+}
+
 export async function runCampaignAgent(
   options: RunAgentOptions,
 ): Promise<AgentResult> {
@@ -158,6 +252,15 @@ export async function runCampaignAgent(
     options.maxPlanningSteps ?? 6,
   );
   const maxToolCalls = positiveIntegerSchema.parse(options.maxToolCalls ?? 2);
+  const providerTimeoutMs = positiveIntegerSchema.parse(
+    options.providerTimeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
+  );
+  const toolTimeoutMs = positiveIntegerSchema.parse(
+    options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
+  );
+  const maxRetries = nonnegativeIntegerSchema.parse(
+    options.maxRetries ?? DEFAULT_MAX_RETRIES,
+  );
   const state = initializeAgentState(options.brief, options.today);
   const executedToolActions = new Set<string>();
   let toolCallCount = 0;
@@ -169,17 +272,63 @@ export async function runCampaignAgent(
     state.stepCount += 1;
 
     let rawAction: unknown;
-    try {
-      rawAction = await options.provider.decideNextAction(providerContext(state));
-    } catch {
-      return fail(state, {
-        code: "PROVIDER_FAILURE",
-        message: "The provider could not produce a next action.",
-      });
+    let providerAttempt = 0;
+    let providerDurationMs = 0;
+    while (providerAttempt <= maxRetries) {
+      providerAttempt += 1;
+      try {
+        const attemptResult = await runOperationAttempt({
+          operation: (signal) =>
+            options.provider.decideNextAction(providerContext(state), signal),
+          timeoutMs: providerTimeoutMs,
+          ...(options.signal ? { externalSignal: options.signal } : {}),
+          timeoutCode: "PROVIDER_TIMEOUT",
+          cancellationCode: "PROVIDER_CANCELLED",
+          failureCode: "PROVIDER_FAILURE",
+        });
+        rawAction = attemptResult.value;
+        providerDurationMs = attemptResult.durationMs;
+        break;
+      } catch (error) {
+        if (!(error instanceof OperationAttemptFailure)) throw error;
+        addEvent(state, {
+          eventType: "ACTION_PROPOSED",
+          outcome:
+            error.boundary === "timeout"
+              ? "timed_out"
+              : error.boundary === "cancellation"
+                ? "cancelled"
+                : "failed",
+          errorCode: error.code,
+          durationMs: error.durationMs,
+          attempt: providerAttempt,
+        });
+        if (
+          canRetry(
+            error,
+            options.provider.retrySafe === true,
+            providerAttempt,
+            maxRetries,
+          )
+        ) {
+          continue;
+        }
+        return fail(
+          state,
+          providerTerminalError(error, options.provider.retrySafe === true),
+        );
+      }
     }
 
     const parsedAction = AgentActionSchema.safeParse(rawAction);
     if (!parsedAction.success) {
+      addEvent(state, {
+        eventType: "ACTION_PROPOSED",
+        outcome: "invalid",
+        errorCode: "INVALID_PROVIDER_ACTION",
+        durationMs: providerDurationMs,
+        attempt: providerAttempt,
+      });
       return fail(state, {
         code: "INVALID_PROVIDER_ACTION",
         message: "The provider proposed an action that failed strict validation.",
@@ -189,6 +338,8 @@ export async function runCampaignAgent(
     addEvent(state, {
       eventType: "ACTION_PROPOSED",
       outcome: action.type,
+      durationMs: providerDurationMs,
+      attempt: providerAttempt,
       ...(action.type === "CALL_TOOL" ? { toolName: action.toolName } : {}),
     });
 
@@ -331,36 +482,86 @@ export async function runCampaignAgent(
       eventType: "TOOL_STARTED",
       toolName: tool.name,
       outcome: "started",
+      attempt: 1,
     });
 
     let output: unknown;
-    try {
-      output = await tool.execute({ state, config });
-    } catch {
-      const toolError = {
-        code: "TOOL_EXECUTION_FAILURE",
-        message: "The authorized tool failed during execution.",
-      } as const;
-      state.toolResults.push({
-        toolName: tool.name,
-        success: false,
-        error: toolError,
-      });
-      addEvent(state, {
-        eventType: "TOOL_FAILED",
-        toolName: tool.name,
-        outcome: "failed",
-        errorCode: toolError.code,
-      });
-      return fail(state, toolError, tool.name);
+    let toolAttempt = 0;
+    let toolCompleted = false;
+    while (toolAttempt <= maxRetries) {
+      toolAttempt += 1;
+      if (toolAttempt > 1) {
+        addEvent(state, {
+          eventType: "TOOL_STARTED",
+          toolName: tool.name,
+          outcome: "started",
+          attempt: toolAttempt,
+        });
+      }
+      try {
+        const attemptResult = await runOperationAttempt({
+          operation: (signal) =>
+            tool.execute({
+              state: structuredClone(state),
+              config: structuredClone(config),
+              signal,
+            }),
+          timeoutMs: toolTimeoutMs,
+          ...(options.signal ? { externalSignal: options.signal } : {}),
+          timeoutCode: "TOOL_TIMEOUT",
+          cancellationCode: "TOOL_CANCELLED",
+          failureCode: "TOOL_EXECUTION_FAILURE",
+        });
+        output = attemptResult.value;
+        toolCompleted = true;
+        addEvent(state, {
+          eventType: "TOOL_SUCCEEDED",
+          toolName: tool.name,
+          outcome: "succeeded",
+          durationMs: attemptResult.durationMs,
+          attempt: toolAttempt,
+        });
+        break;
+      } catch (error) {
+        if (!(error instanceof OperationAttemptFailure)) throw error;
+        addEvent(state, {
+          eventType: "TOOL_FAILED",
+          toolName: tool.name,
+          outcome:
+            error.boundary === "timeout"
+              ? "timed_out"
+              : error.boundary === "cancellation"
+                ? "cancelled"
+                : "failed",
+          errorCode: error.code,
+          durationMs: error.durationMs,
+          attempt: toolAttempt,
+        });
+        if (canRetry(error, tool.idempotent, toolAttempt, maxRetries)) {
+          continue;
+        }
+        const toolError = toolTerminalError(error, tool.idempotent);
+        state.toolResults.push({
+          toolName: tool.name,
+          success: false,
+          error: toolError,
+        });
+        return fail(state, toolError, tool.name);
+      }
+    }
+
+    if (!toolCompleted) {
+      return fail(
+        state,
+        {
+          code: "TOOL_EXECUTION_FAILURE",
+          message: "The authorized tool did not complete.",
+        },
+        tool.name,
+      );
     }
 
     state.toolResults.push({ toolName: tool.name, success: true, output });
-    addEvent(state, {
-      eventType: "TOOL_SUCCEEDED",
-      toolName: tool.name,
-      outcome: "succeeded",
-    });
 
     if (tool.name === EVALUATE_CAMPAIGN_READINESS) {
       const evaluation = EvaluationResultSchema.safeParse(

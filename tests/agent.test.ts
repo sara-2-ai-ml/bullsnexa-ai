@@ -290,7 +290,7 @@ describe("orchestration safety boundaries", () => {
     const mutatingProvider: AgentProvider = {
       async decideNextAction(context: ProviderContext): Promise<AgentAction> {
         (context.currentBrief as { budgetAmount: number }).budgetAmount = -99;
-        return mock.decideNextAction(context);
+        return mock.decideNextAction(context, new AbortController().signal);
       },
     };
     const result = await runCampaignAgent({

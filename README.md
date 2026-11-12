@@ -2,7 +2,7 @@
 
 > BullsNexa is an independent technical-assignment prototype and is not an official Bulls Vision Group product.
 
-BullsNexa is intended to turn a marketing campaign brief into a validated, actionable campaign launch-readiness plan. Phase 0 established the backend foundation, Phase 1 added deterministic readiness decisions, and Phase 2A adds a bounded provider-neutral agent for structured briefs.
+BullsNexa is intended to turn a marketing campaign brief into a validated, actionable campaign launch-readiness plan. Phase 0 established the backend foundation, Phase 1 added deterministic readiness decisions, Phase 2A added a bounded provider-neutral agent, and Phase 2B adds focused per-operation reliability.
 
 ## Business problem
 
@@ -41,10 +41,18 @@ Campaign teams often receive incomplete briefs spread across free-form text. Imp
 - A deterministic `MockProvider` whose next action depends on actual prior tool output. It simulates provider decisions; it is not genuine LLM reasoning.
 - In-memory execution traces and orchestrator-generated summaries grounded in verified results.
 
+### Implemented — Phase 2B
+
+- Configurable provider and tool timeouts, defaulting to 5 seconds per operation.
+- Cooperative `AbortSignal` propagation for timeouts and caller cancellation.
+- One retry by default, limited to explicitly classified transient failures on retry-safe providers or idempotent tools.
+- Attempt and duration metadata on provider/tool trace events.
+- Isolation of provider context and tool state snapshots so late results cannot update terminal agent state.
+
 ### Planned
 
 - Natural-language brief extraction and real Claude provider integration.
-- Phase 2B reliability work such as carefully bounded retries and deadline cancellation.
+- An overall run deadline and stronger isolation for operations that ignore cancellation.
 - Persistence, human approval, a minimal UI, and broader end-to-end evaluations.
 
 ### Not implemented
@@ -173,7 +181,13 @@ After building, generate three real synthetic traces (complete, incomplete, and 
 node dist/agent/demo-traces.js
 ```
 
-Trace events contain correlation IDs, step, event type, tool name when applicable, outcome, and sanitized error code. Full campaign input is not copied into trace events. Trace and tool state are in memory only.
+Trace events contain correlation IDs, step, event type, tool name when applicable, outcome, sanitized error code, and attempt number. Measured `durationMs` is recorded only when a provider attempt or tool operation succeeds, fails, times out, or is cancelled; `TOOL_STARTED` does not claim an elapsed duration. Full campaign input is not copied into trace events. Trace and tool state are in memory only.
+
+Each provider or tool attempt has its own finite timeout. Timeout aborts are cooperative: compatible handlers receive an `AbortSignal`, while `Promise.race`-style completion ensures the orchestrator stops waiting. This does not guarantee physical cancellation when an implementation ignores the signal. Such a late result cannot update terminal agent state because providers receive cloned context and tools execute against a cloned state snapshot, but an uncooperative operation could still perform its own external side effects.
+
+Retries are deliberately narrow. The default is one retry, and it applies only when an operation throws `TransientAgentOperationError` and the provider declares `retrySafe: true` or the tool declares `idempotent: true`. Timeouts, cancellation, ordinary exceptions, validation failures, unknown/unauthorized tools, malformed arguments, refusals, clarification, and business decisions are never retried. A future Anthropic provider must coordinate SDK-level and orchestrator retry counts to avoid duplicate requests.
+
+Phase 2B implements no overall run deadline; only individual provider and tool attempts are bounded. An externally supplied signal can cancel the active operation, but distributed cancellation and worker isolation are out of scope.
 
 ## Verification
 
@@ -183,7 +197,7 @@ npm test
 npm run build
 ```
 
-Tests use `Fastify.inject()` for HTTP behavior and local pure functions for the domain and agent layers. They cover schemas, business rules, score boundaries, dataset integrity, dynamic tool-result-driven planning, strict action and argument validation, authorization, bounded execution, controlled failures, deterministic summaries, and minimal traces. The seven future integration cases remain schema-validated fixtures and are not counted as passing agent tests.
+Tests use `Fastify.inject()` for HTTP behavior and local pure functions for the domain and agent layers. They cover schemas, business rules, score boundaries, dataset integrity, planning, strict validation, authorization, bounded execution, provider/tool timeouts, cancellation, safe retries, late-result isolation, deterministic summaries, and traces. The seven future integration cases remain schema-validated fixtures and are not counted as passing agent tests.
 
 For real requests, a future application boundary or orchestrator must supply `today`; the evaluator never substitutes or reads the system date.
 
@@ -200,7 +214,7 @@ ANTHROPIC_MODEL=claude-haiku-5-5
 npm run smoke:anthropic
 ```
 
-The smoke test is separate from the agent and test suite. Phase 1 does not call Anthropic; automated domain tests require no credentials or network access.
+The smoke test is separate from the agent and test suite. Automated domain and agent tests use no Anthropic credentials or network access.
 
 ## Docker
 
@@ -220,10 +234,11 @@ Docker remains **NOT VERIFIED** in this workspace because the Docker CLI is unav
 ## Limitations and roadmap
 
 - Verification currently uses Node 25.6.1 while the project targets Node 24 LTS; Node 24 remains unverified in this environment.
-- Phase 2A accepts structured input only; free-text extraction and ambiguity resolution are future integrations.
+- Phase 2B accepts structured input only; free-text extraction and ambiguity resolution are future integrations.
 - The country validator enforces the documented alpha-2 format but does not ship a complete ISO country registry.
 - The rules and policy documents are synthetic demonstration material, not business or legal guidance.
 - The agent uses deterministic MockProvider decisions, not genuine LLM reasoning; real Claude tool calling is not implemented.
-- Advanced retries, deadline cancellation, persistence, approval workflows, and UI remain Phase 2B or later work.
+- There is no overall run deadline. Per-operation timeouts cannot physically stop code that ignores `AbortSignal`; worker isolation is not implemented.
+- Persistence, approval workflows, and UI remain future work.
 
 See [ENGINEERING_LOG.md](./ENGINEERING_LOG.md) for the phase-by-phase engineering record.

@@ -22,7 +22,13 @@ function successfulOutput<T>(
 }
 
 export class MockProvider implements AgentProvider {
-  async decideNextAction(context: ProviderContext): Promise<AgentAction> {
+  readonly retrySafe = true;
+
+  async decideNextAction(
+    context: ProviderContext,
+    signal: AbortSignal,
+  ): Promise<AgentAction> {
+    signal.throwIfAborted();
     const evaluation = successfulOutput<EvaluateCampaignReadinessResult>(
       context,
       EVALUATE_CAMPAIGN_READINESS,
