@@ -27,10 +27,10 @@ async function main(): Promise<void> {
   }
 
   try {
-    const client = new Anthropic({ apiKey });
+    const client = new Anthropic({ apiKey, maxRetries: 0 });
     const response = await client.messages.create({
       model,
-      max_tokens: 128,
+      max_tokens: 64,
       tool_choice: { type: "tool", name: "add_numbers" },
       tools: [
         {
@@ -70,7 +70,9 @@ async function main(): Promise<void> {
       return;
     }
 
-    console.log(`PASS: model=${model} tool_use=true`);
+    console.log(
+      `PASS: model=${model} tool_use=true input_tokens=${response.usage.input_tokens} output_tokens=${response.usage.output_tokens}`,
+    );
   } catch (error) {
     console.error(`FAIL: model=${model} tool_use=false category=${errorCategory(error)}`);
     process.exitCode = 1;
