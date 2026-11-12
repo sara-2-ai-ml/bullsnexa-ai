@@ -254,3 +254,23 @@ The evaluator remains pure: `today` is explicit, fixed fixture dates are unchang
 Verification used Node 25.6.1. The declared Node 24 runtime was not available and therefore remains unverified. The final quality gate passed with 6 test files and 67 tests, plus successful typecheck and production build. The dataset remains exactly 15 cases: 8 executable and 7 deferred.
 
 Phase 1.1 stops here pending review.
+
+## Phase 2A — Secure, working agent core
+
+Phase 2A adds one bounded provider-neutral agent around the existing deterministic domain engine. It accepts a structured campaign brief plus an explicit `today`; it does not extract data from prose or contact an LLM.
+
+The execution state separates technical statuses (`CREATED`, `PLANNING`, `TOOL_RUNNING`, `WAITING_FOR_CLARIFICATION`, `COMPLETED`, `FAILED`, and `REFUSED`) from the domain statuses (`READY`, `NEEDS_REVIEW`, and `BLOCKED`). Strict Zod actions allow only tool calls, clarification, finish, or refusal. Provider context is cloned, tool inputs are strict empty objects, and registered tools always read the brief, date, and rules from trusted state.
+
+Two tools have deliberately different responsibilities. `checkCampaignFields` projects the existing Phase 1 inspection into missing fields, structurally invalid fields, authoritative issues with severity/code, clarification questions, and a `canEvaluate` routing signal. It does not score or assign business status. `evaluateCampaignReadiness` calls the existing evaluator and is the only source of a business decision. A Phase 1 blocker takes precedence over simultaneous missing-field questions, so a supplied negative budget reaches the evaluator and remains `BLOCKED`.
+
+`MockProvider` is a deterministic simulation of provider decisions, not genuine LLM reasoning. Its first action requests field inspection. It then selects clarification or full evaluation from the actual inspection result, and finishes only after the evaluator returns a decision. The orchestrator independently enforces the finish precondition and creates the final summary from verified decision data.
+
+Reliability controls are intentionally small: maximum planning steps, maximum tool calls, repeated tool-action detection, strict action/argument validation, authorization checks, and safe provider/tool failure handling. Invalid `today` remains a technical `FAILED` result with no business decision or score. No retries, deadline cancellation, persistence, database, UI, approval endpoint, or Anthropic provider was added.
+
+Execution events are stored in memory and contain run/trace IDs, step, event type, tool name where relevant, outcome, and sanitized error code. The compiled `demo-traces` path produces actual complete, incomplete, and controlled-failure traces from synthetic inputs.
+
+Verification on 2026-11-12 used Node 25.6.1, outside the declared Node 24 target. Typecheck passed, all 7 test files and 92 tests passed, and the production build passed. The existing evaluation dataset remains 15 fixtures: 8 executable domain cases and 7 deferred cases. No Anthropic request, dependency installation/update, staging, commit, or push occurred during Phase 2A.
+
+**Not in production today.** Natural-language extraction, a real Claude provider, persistence, advanced retry/deadline behavior, human approval, frontend, and advertising-platform integrations remain future work.
+
+Phase 2A stops here pending review.

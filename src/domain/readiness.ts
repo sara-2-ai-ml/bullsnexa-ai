@@ -31,6 +31,14 @@ interface Inspection {
   readonly validationResult: ValidationResult;
 }
 
+export interface CampaignFieldInspection {
+  readonly missingFields: readonly string[];
+  readonly invalidFields: readonly string[];
+  readonly issues: readonly ValidationIssue[];
+  readonly clarificationQuestions: readonly ClarificationQuestion[];
+  readonly canEvaluate: boolean;
+}
+
 interface StatusInputs {
   readonly score: number;
   readonly readinessThreshold: number;
@@ -461,6 +469,49 @@ function inspectBrief(
     risks,
     questions,
     validationResult,
+  };
+}
+
+export function inspectCampaignBrief(
+  brief: unknown,
+  config: SyntheticRulesConfig,
+  today: string,
+): CampaignFieldInspection {
+  const inspection = inspectBrief(brief, config, today);
+  const clarificationFields = new Set(
+    inspection.questions.map((question) => question.fieldPath),
+  );
+  const hasBlocker = inspection.issues.some(
+    (issue) => issue.severity === "BLOCKER",
+  );
+  const hasStructurallyUnusableField = inspection.issues.some(
+    (issue) =>
+      issue.severity === "WARNING" && clarificationFields.has(issue.fieldPath),
+  );
+
+  return {
+    missingFields: [
+      ...new Set(
+        inspection.issues
+          .filter((issue) => issue.code === "MISSING_REQUIRED_FIELD")
+          .map((issue) => issue.fieldPath),
+      ),
+    ],
+    invalidFields: [
+      ...new Set(
+        inspection.issues
+          .filter(
+            (issue) =>
+              issue.code !== "MISSING_REQUIRED_FIELD" &&
+              issue.severity === "WARNING" &&
+              clarificationFields.has(issue.fieldPath),
+          )
+          .map((issue) => issue.fieldPath),
+      ),
+    ],
+    issues: [...inspection.issues],
+    clarificationQuestions: [...inspection.questions],
+    canEvaluate: hasBlocker || !hasStructurallyUnusableField,
   };
 }
 

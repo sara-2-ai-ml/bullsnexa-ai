@@ -2,7 +2,7 @@
 
 > BullsNexa is an independent technical-assignment prototype and is not an official Bulls Vision Group product.
 
-BullsNexa is intended to turn a natural-language marketing campaign brief into a validated, actionable campaign launch-readiness plan. Phase 0 established the backend foundation; Phase 1 adds the deterministic domain layer that validates structured briefs and produces explainable readiness decisions. The AI agent is not implemented yet.
+BullsNexa is intended to turn a marketing campaign brief into a validated, actionable campaign launch-readiness plan. Phase 0 established the backend foundation, Phase 1 added deterministic readiness decisions, and Phase 2A adds a bounded provider-neutral agent for structured briefs.
 
 ## Business problem
 
@@ -32,15 +32,24 @@ Campaign teams often receive incomplete briefs spread across free-form text. Imp
 - Fifteen evaluation fixtures: 8 executable domain cases and 7 explicitly deferred integration/security cases.
 - Unit, policy-consistency, boundary, and dataset-integrity tests.
 
+### Implemented — Phase 2A
+
+- A bounded plan/tool/replan loop with separate technical execution and business readiness statuses.
+- Strict provider actions, an authorized tool registry, zero-argument tool schemas, tool-call limits, planning-step limits, and repeated-action detection.
+- `checkCampaignFields`, which exposes existing Phase 1 issue codes, severities, missing/invalid fields, and clarification questions without scoring or assigning business status.
+- `evaluateCampaignReadiness`, which delegates business decisions exclusively to the existing Phase 1 evaluator.
+- A deterministic `MockProvider` whose next action depends on actual prior tool output. It simulates provider decisions; it is not genuine LLM reasoning.
+- In-memory execution traces and orchestrator-generated summaries grounded in verified results.
+
 ### Planned
 
-- Structured brief extraction, a provider-neutral interface, and deterministic MockProvider mode.
-- One plan-and-execute agent—not a multi-agent system—with at least two narrow tools.
-- Bounded retries, refusals, execution traces, persistence, human approval, a minimal UI, and end-to-end evaluations.
+- Natural-language brief extraction and real Claude provider integration.
+- Phase 2B reliability work such as carefully bounded retries and deadline cancellation.
+- Persistence, human approval, a minimal UI, and broader end-to-end evaluations.
 
 ### Not implemented
 
-The repository contains no prompt orchestration, agent loop, tool execution, policy retrieval, database, approval workflow, frontend, or end-to-end AI workflow. Phase 1 evaluates structured objects only and does not interpret free text. Do not interpret the Anthropic smoke test or evaluation fixtures as an implemented agent.
+The repository contains no natural-language extraction, real Claude agent provider, policy retrieval, database, approval workflow, frontend, advertising-platform integration, or ad publishing. Do not interpret the deterministic MockProvider, Anthropic smoke test, or evaluation fixtures as production AI automation.
 
 ## Technology
 
@@ -132,6 +141,40 @@ structured partial brief + explicit rules + explicit today
  status + score + issues + risks + clarification questions
 ```
 
+## Phase 2A agent flow
+
+The agent accepts an already structured campaign brief and an explicit evaluation date. Provider output is treated as untrusted and validated as one of four strict actions: `CALL_TOOL`, `ASK_USER`, `FINISH`, or `REFUSE`.
+
+```text
+structured brief + explicit today
+              |
+              v
+       MockProvider decision
+              |
+              v
+ checkCampaignFields ---- insufficient ----> clarification
+              |
+       sufficient or BLOCKER
+              v
+ evaluateCampaignReadiness
+              |
+      decision or technical error
+              v
+ orchestrator summary / safe failure
+```
+
+Both tools use the trusted brief and date held in agent state. Their argument schemas are strict empty objects, so a provider cannot replace the budget, dates, objective, policy configuration, or campaign data. The pre-check exposes the Phase 1 inspection findings but never computes a score or business status. `FINISH` is accepted only after a successful authoritative evaluation.
+
+`MockProvider` chooses the evaluator or clarification path from the actual `checkCampaignFields` result, including BLOCKER precedence. The orchestrator generates the final summary from verified domain data; provider prose is not authoritative.
+
+After building, generate three real synthetic traces (complete, incomplete, and controlled failure) with:
+
+```bash
+node dist/agent/demo-traces.js
+```
+
+Trace events contain correlation IDs, step, event type, tool name when applicable, outcome, and sanitized error code. Full campaign input is not copied into trace events. Trace and tool state are in memory only.
+
 ## Verification
 
 ```bash
@@ -140,7 +183,7 @@ npm test
 npm run build
 ```
 
-Tests use `Fastify.inject()` for HTTP behavior and local pure functions for the domain layer. They cover schemas, budget/date/category rules, objective/KPI compatibility, score boundaries, the Germany privacy-review case, policy-reference consistency, determinism, and evaluation-dataset integrity. The seven future integration cases are schema-validated fixtures but are not executed or reported as passing agent tests.
+Tests use `Fastify.inject()` for HTTP behavior and local pure functions for the domain and agent layers. They cover schemas, business rules, score boundaries, dataset integrity, dynamic tool-result-driven planning, strict action and argument validation, authorization, bounded execution, controlled failures, deterministic summaries, and minimal traces. The seven future integration cases remain schema-validated fixtures and are not counted as passing agent tests.
 
 For real requests, a future application boundary or orchestrator must supply `today`; the evaluator never substitutes or reads the system date.
 
@@ -150,7 +193,7 @@ Copy `.env.example` to `.env` and provide both values only when live provider ve
 
 ```dotenv
 ANTHROPIC_API_KEY=
-ANTHROPIC_MODEL=
+ANTHROPIC_MODEL=claude-haiku-5-5
 ```
 
 ```bash
@@ -177,9 +220,10 @@ Docker remains **NOT VERIFIED** in this workspace because the Docker CLI is unav
 ## Limitations and roadmap
 
 - Verification currently uses Node 25.6.1 while the project targets Node 24 LTS; Node 24 remains unverified in this environment.
-- Phase 1 accepts structured input only; free-text extraction and ambiguity resolution are future agent responsibilities.
+- Phase 2A accepts structured input only; free-text extraction and ambiguity resolution are future integrations.
 - The country validator enforces the documented alpha-2 format but does not ship a complete ISO country registry.
 - The rules and policy documents are synthetic demonstration material, not business or legal guidance.
-- Phase 2 should introduce a provider-neutral structured extraction boundary and deterministic MockProvider behavior before bounded agent orchestration and tools.
+- The agent uses deterministic MockProvider decisions, not genuine LLM reasoning; real Claude tool calling is not implemented.
+- Advanced retries, deadline cancellation, persistence, approval workflows, and UI remain Phase 2B or later work.
 
 See [ENGINEERING_LOG.md](./ENGINEERING_LOG.md) for the phase-by-phase engineering record.
