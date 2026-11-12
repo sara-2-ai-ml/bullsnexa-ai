@@ -2,34 +2,44 @@
 
 > BullsNexa is an independent technical-assignment prototype and is not an official Bulls Vision Group product.
 
-BullsNexa is intended to turn a natural-language marketing campaign brief into a validated, actionable campaign launch-readiness plan. Phase 0 establishes the secure, testable backend foundation only; it deliberately does not implement the AI agent or campaign workflow yet.
+BullsNexa is intended to turn a natural-language marketing campaign brief into a validated, actionable campaign launch-readiness plan. Phase 0 established the backend foundation; Phase 1 adds the deterministic domain layer that validates structured briefs and produces explainable readiness decisions. The AI agent is not implemented yet.
 
 ## Business problem
 
-Campaign teams often receive incomplete briefs spread across free-form text. Important budget, audience, compliance, channel, and measurement details can be missed before launch. The planned system will interpret a brief, execute narrow tools, apply deterministic business rules, and produce both structured JSON and a readable readiness summary with an observable decision trail.
+Campaign teams often receive incomplete briefs spread across free-form text. Important budget, audience, compliance, channel, and measurement details can be missed before launch. The planned system will interpret a brief, execute narrow tools, apply deterministic business rules, and produce structured JSON plus a readable readiness summary with an observable decision trail.
 
-## Scope
+## Current scope
 
-### IMPLEMENTED — Phase 0
+### Implemented — Phase 0
 
 - Strict TypeScript, ESM, and NodeNext compilation.
 - Fastify application factory and production server entry point.
 - `GET /health`, consistent 404 responses, centralized safe error handling, and request IDs.
 - Structured Pino logging with secret redaction and no request-body logging.
 - Vitest API and logging-security tests.
-- Optional real Anthropic tool-use connectivity smoke test.
+- Optional Anthropic tool-use connectivity smoke test.
 - Multi-stage, non-root, Debian-slim Docker foundation.
 
-### PLANNED
+### Implemented — Phase 1
 
-- One plan-and-execute AI agent, not a multi-agent system.
-- Validated `CampaignBrief` domain schemas and deterministic policy rules.
-- At least two narrow tools, provider and deterministic mock modes, bounded retries, refusals, and execution traces.
-- Readiness scoring, human approval, SQLite persistence, a minimal UI, and an evaluation dataset.
+- Zod contracts for partial and fully validated campaign briefs.
+- Structured objectives and KPI targets with deterministic compatibility rules.
+- Versioned synthetic rule configuration and policy references.
+- Pure `evaluateReadiness(brief, config, today)` evaluation with no network, database, clock, randomness, or LLM dependency.
+- Explainable 100-point scoring, structured issues/risks/questions, and `READY`, `NEEDS_REVIEW`, or `BLOCKED` status.
+- EU lead-generation privacy-review trigger using a versioned EU country-code list.
+- Fifteen evaluation fixtures: 8 executable domain cases and 7 explicitly deferred integration/security cases.
+- Unit, policy-consistency, boundary, and dataset-integrity tests.
 
-### OUT OF SCOPE / NOT IMPLEMENTED
+### Planned
 
-Phase 0 contains no campaign workflow, prompt orchestration, tool execution, database, readiness decision, human approval, frontend, or evaluation pipeline. Do not interpret the Anthropic smoke test as an agent.
+- Structured brief extraction, a provider-neutral interface, and deterministic MockProvider mode.
+- One plan-and-execute agent—not a multi-agent system—with at least two narrow tools.
+- Bounded retries, refusals, execution traces, persistence, human approval, a minimal UI, and end-to-end evaluations.
+
+### Not implemented
+
+The repository contains no prompt orchestration, agent loop, tool execution, policy retrieval, database, approval workflow, frontend, or end-to-end AI workflow. Phase 1 evaluates structured objects only and does not interpret free text. Do not interpret the Anthropic smoke test or evaluation fixtures as an implemented agent.
 
 ## Technology
 
@@ -53,11 +63,9 @@ npm run build
 npm start
 ```
 
-## API
+## API foundation
 
-### `GET /health`
-
-Returns HTTP 200:
+`GET /health` returns HTTP 200:
 
 ```json
 {
@@ -78,6 +86,47 @@ Unknown routes return HTTP 404 using the shared safe envelope:
 }
 ```
 
+The Phase 1 evaluator is currently a domain API, not an HTTP endpoint:
+
+```ts
+evaluateReadiness(brief, syntheticRulesConfig, "2026-01-15");
+```
+
+It returns score components, validation issues, risks, clarification questions, policy references, rule version, human-review state, and a business status.
+
+## Readiness model
+
+> **SYNTHETIC DEMO RULES — NOT OFFICIAL BULLS VISION GROUP POLICIES OR LEGAL GUIDANCE.**
+
+| Component | Maximum |
+| --- | ---: |
+| Campaign completeness | 40 |
+| Budget validity | 20 |
+| Synthetic policy compliance | 25 |
+| Measurable objective | 15 |
+| **Total** | **100** |
+
+Hard violations—invalid supplied budgets, equal/reversed dates, or prohibited categories—produce `BLOCKED`. Missing critical information produces clarification questions and `NEEDS_REVIEW`. Explicit review triggers, including high budgets, unsupported fields, past start dates, incompatible objective/KPI pairs, and EU lead-generation privacy review, produce `NEEDS_REVIEW` unless a blocker takes precedence. Otherwise, a score of at least 85 is `READY`; low score alone is never `BLOCKED`.
+
+Objectives are limited to `leads`, `sales`, `awareness`, `traffic`, and `app_installs`. KPI metrics and their allowed objective mappings are enumerated in the typed configuration. Country inputs use trimmed uppercase ISO alpha-2 codes; country names are not guessed.
+
+See [docs/rubric.md](./docs/rubric.md) for exact weights, deductions, boundaries, and overlap rules. The runtime source of truth is [src/domain/rules-config.ts](./src/domain/rules-config.ts); synthetic policy documents provide reviewer context but cannot override typed rules.
+
+## Domain data flow
+
+```text
+structured partial brief + explicit rules + explicit today
+                 |
+                 v
+       field-level Zod validation
+                 |
+                 v
+ deterministic rules and scoring
+                 |
+                 v
+ status + score + issues + risks + clarification questions
+```
+
 ## Verification
 
 ```bash
@@ -86,17 +135,11 @@ npm test
 npm run build
 ```
 
-Tests use `Fastify.inject()` and do not bind a port. The production build can be checked manually with:
-
-```bash
-npm start
-curl -i http://127.0.0.1:3000/health
-curl -i http://127.0.0.1:3000/unknown
-```
+Tests use `Fastify.inject()` for HTTP behavior and local pure functions for the domain layer. They cover schemas, budget/date/category rules, objective/KPI compatibility, score boundaries, the Germany privacy-review case, policy-reference consistency, determinism, and evaluation-dataset integrity. The seven future integration cases are schema-validated fixtures but are not executed or reported as passing agent tests.
 
 ## Optional Anthropic smoke test
 
-Copy `.env.example` to `.env` and provide both values. The model identifier is intentionally not guessed; use one enabled for your Anthropic account.
+Copy `.env.example` to `.env` and provide both values only when live provider verification is explicitly intended:
 
 ```dotenv
 ANTHROPIC_API_KEY=
@@ -107,7 +150,7 @@ ANTHROPIC_MODEL=
 npm run smoke:anthropic
 ```
 
-The script requests one harmless synthetic `add_numbers` tool call and validates its arguments. It prints only `PASS`, `FAIL`, or `SKIPPED`, a supplied model identifier when relevant, tool-use presence, and a sanitized error category. It never prints the key or raw provider response. Missing configuration produces `SKIPPED` and does not affect build, startup, or tests.
+The smoke test is separate from the agent and test suite. Phase 1 does not call Anthropic; automated domain tests require no credentials or network access.
 
 ## Docker
 
@@ -118,17 +161,18 @@ docker build -t bulls-nexa .
 docker run --rm -p 3000:3000 bulls-nexa
 ```
 
-Docker is **NOT VERIFIED** in this Phase 0 workspace because the Docker CLI is unavailable. The Dockerfile has been reviewed but no successful image build or container health check is claimed.
+Docker remains **NOT VERIFIED** in this workspace because the Docker CLI is unavailable. No successful image build or container health check is claimed.
 
 ## Real-world usage
 
-**Not in production today.** Plausible users include a marketing agency checking client briefs before channel handoff, an in-house growth team standardizing campaign launch gates, and a regulated brand preparing auditable approval packets. Production deployment would require authenticated and authorized access, encrypted secret management, tenant isolation, provider/data-access controls, durable monitoring and alerting, retention policies, human approval for consequential actions, compliance/legal review, and ongoing model and rule evaluation.
+**Not in production today.** Plausible users include a marketing agency checking client briefs before channel handoff, an in-house growth team standardizing launch gates, and a regulated brand preparing auditable approval packets. Production deployment would require authenticated access, secret management, tenant isolation, controlled business data, monitoring, retention rules, human approval for consequential actions, compliance/legal review, and ongoing model and rule evaluation.
 
-## Limitations and next steps
+## Limitations and roadmap
 
-- The local host exposes Node 25.6.1, while the project targets Node 24 LTS; all checks passed on the host, but a clean Node 24 CI run remains advisable.
-- No live Anthropic call was made because credentials were not configured.
-- Docker could not be executed locally.
-- Phase 1 should add only the campaign brief schemas, deterministic business rules, and an initial synthetic evaluation dataset. Later phases can add the bounded single-agent loop and tools.
+- The local host exposes Node 25.6.1 while the project targets Node 24 LTS; Node 24 CI confirmation remains advisable.
+- Phase 1 accepts structured input only; free-text extraction and ambiguity resolution are future agent responsibilities.
+- The country validator enforces the documented alpha-2 format but does not ship a complete ISO country registry.
+- The rules and policy documents are synthetic demonstration material, not business or legal guidance.
+- Phase 2 should introduce a provider-neutral structured extraction boundary and deterministic MockProvider behavior before bounded agent orchestration and tools.
 
-See [ENGINEERING_LOG.md](./ENGINEERING_LOG.md) for the Phase 0 architecture and observed verification results.
+See [ENGINEERING_LOG.md](./ENGINEERING_LOG.md) for the phase-by-phase engineering record.

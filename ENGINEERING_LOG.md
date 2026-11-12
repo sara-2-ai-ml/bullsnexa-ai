@@ -120,3 +120,121 @@ An earlier concurrent smoke attempt using `node --import tsx` failed before the 
 Phase 1 should define the `CampaignBrief` schemas, deterministic validation/business rules, explicit error categories, and a small synthetic evaluation dataset. It should not yet grow into a multi-agent architecture. Provider and mock orchestration, tool execution, persistence, approval, UI, and broader evaluations belong to subsequent controlled phases.
 
 Phase 0 stops here pending review.
+
+## Phase 1 — Domain models, business rules, and evaluation
+
+Status: complete locally and awaiting review. Phase 1 adds deterministic campaign-readiness logic only; it does not add an AI agent, provider call, tools, persistence, or an HTTP campaign endpoint.
+
+### 1. What we built
+
+- Runtime Zod schemas for partial and fully validated campaign briefs, objectives, KPI targets, issues, risks, questions, score breakdowns, and decisions.
+- Versioned `syntheticRulesConfig` containing every scoring weight, threshold, supported value, objective/KPI mapping, policy reference, prohibited category, and EU country code used at runtime.
+- Pure `validateCampaignBrief()` and `evaluateReadiness(brief, config, today)` functions.
+- Five concise synthetic policy documents and an exact 100-point rubric.
+- A 15-case evaluation dataset with 8 executable domain cases and 7 explicitly deferred integration/security cases.
+- Tests for schema behavior, business validation, score boundaries, policy consistency, determinism, and dataset integrity.
+
+### 2. Why the domain layer exists
+
+An LLM is useful for interpreting language, but it should not decide whether a negative budget is valid, whether dates are ordered, or whether an approval rule applies. The domain layer converts validated structured input into repeatable business evidence. A future agent may propose tool arguments, but this layer remains the deterministic authority that accepts, questions, reviews, or blocks them.
+
+Keeping this boundary independent from Fastify and Anthropic also makes it cheap to test. Every result can be reproduced from three inputs: the brief, a rule configuration, and an explicit calendar date.
+
+### 3. TypeScript types versus Zod validation
+
+TypeScript types disappear when JavaScript runs; they protect developers while compiling but cannot prove that JSON from a user, model, or file is safe. Zod schemas execute at runtime. Phase 1 uses both: TypeScript describes contracts inside the codebase, while Zod rejects malformed values at system boundaries and validates the final decision shape.
+
+The evaluator validates fields independently rather than parsing the entire brief as all-or-nothing. This preserves the important distinction between absent data, supplied invalid data, and supplied valid data. A missing budget triggers a question; a supplied negative or non-finite budget triggers a blocker.
+
+### 4. Partial and fully validated briefs
+
+`PartialCampaignBriefSchema` allows required campaign fields to be absent because real briefs are incomplete. It does not coerce invalid supplied values. `ValidatedCampaignBriefSchema` requires the complete structural contract, including a positive finite budget, enumerated objective, structured KPI, channels, dates, country code, and category.
+
+Structural validity is separate from readiness. A structurally complete campaign can still need review because of a high budget or EU privacy trigger, or be blocked by a prohibited category.
+
+### 5. Business status versus technical state
+
+Phase 1 statuses are only `READY`, `NEEDS_REVIEW`, and `BLOCKED`. They describe a campaign business decision. Future execution states such as running, failed, retried, refused, or awaiting a tool response belong to orchestration and are intentionally absent.
+
+### 6. Rubric and precedence
+
+The rubric is defined in `docs/rubric.md` and totals 100:
+
+| Component | Maximum |
+| --- | ---: |
+| Completeness | 40 |
+| Budget validity | 20 |
+| Synthetic policy compliance | 25 |
+| Measurable objective | 15 |
+
+Status precedence is blocker, missing/invalid critical information, mandatory review, score below 85, then ready. Low score alone never blocks. Tests cover 59, 60, 79, 80, 84, and 85, plus high-score blocker and review overrides.
+
+The policy component gives zero when evidence is unavailable rather than claiming compliance. Completeness and policy deductions may both reflect one invalid field because they answer different questions: whether the brief is complete and whether policy evidence can be established. Deductions inside a policy subcomponent are capped.
+
+### 7. Clarification instead of invention
+
+All fields required by `ValidatedCampaignBrief` are readiness gates: campaign name, objective, audience, country, channels, budget, currency, dates, KPI, and category. This includes—and conservatively extends—the minimum critical set of objective, budget, channels, country, and dates. Missing or invalid required data produces stable structured issues and clarification questions; only `additionalNotes` is optional. Unsupported objectives are never mapped from vague text. Objective/KPI compatibility comes only from the explicit mapping in `rules-config.ts`; no regex or LLM semantic inference is used.
+
+### 8. Pure-function and date design
+
+The evaluator receives `today` as an ISO `YYYY-MM-DD` value. It does not call `Date.now()`, read files, contact services, use a database, or mutate global state. Date-only strings are compared after calendar validation, avoiding local-time and daylight-saving ambiguity. Identical inputs are tested to produce deeply equal results.
+
+### 9. Versioned rules and synthetic policies
+
+Rules version `1.0.0` is the runtime source of truth. Policy Markdown is reviewer-facing context and cannot override the typed configuration. Tests verify every configured policy path exists, score weights total 100, deductions fit their caps, supported-value schemas remain aligned, and the versioned EU list has 27 unique codes including Germany.
+
+The EU leads rule is deliberately conservative: a `leads` objective targeting an EU code creates a `REVIEW_REQUIRED` issue, `requiresHumanReview = true`, and a `PRIVACY_REVIEW_POLICY_V1` reference. It is synthetic review routing—not a legal conclusion about EU campaigns.
+
+### 10. Architecture and data flow
+
+```text
+untrusted structured input
+        |
+        v
+field-level Zod parsing ----> structured issues/questions
+        |
+        v
+typed rules + explicit today
+        |
+        +--> completeness score
+        +--> budget score
+        +--> policy score and risks
+        +--> objective/KPI score
+        |
+        v
+precedence decision --> validated structured result
+```
+
+`schemas.ts` owns runtime contracts, `rules-config.ts` owns versioned rules, `readiness.ts` owns pure validation/scoring/decision logic, and `evaluation-dataset.ts` owns fixture contracts. `evals/campaign-cases.json` stores expectations written against the rubric.
+
+### 11. Tests and observed verification
+
+On 2026-11-12, after a clean Phase 1 implementation pass:
+
+| Command/check | Observed result |
+| --- | --- |
+| `npm run typecheck` | PASS — no diagnostics |
+| `npm test` | PASS — 6 files, 63 tests |
+| `npm run build` | PASS — production TypeScript compilation completed |
+| Objective/KPI compatibility | PASS — valid mappings and invalid pairing covered |
+| Germany privacy case | PASS — score 97, `NEEDS_REVIEW`, policy reference present |
+| Dataset integrity | PASS — exactly 15 cases: 8 executable, 7 future integration |
+| Policy references | PASS — every configured reference resolves to a synthetic document |
+| Score boundaries | PASS — exact threshold and precedence cases covered |
+
+An added equal-date boundary test initially exposed that validation blocked equal dates while the policy scorer still awarded date points. The scorer was corrected to require `endDate > startDate`, and the full suite then passed. No future integration case is counted as an executed Phase 1 pass.
+
+### 12. Decisions, trade-offs, and limitations
+
+- Country normalization only trims and uppercases two-letter codes. A full ISO country registry was avoided to keep Phase 1 focused; format-valid fictitious codes are therefore not rejected.
+- Category identifiers are normalized to trimmed lowercase strings. The prohibited list is synthetic and intentionally small.
+- Unsupported currencies and channels require review rather than blocking, because the demo policies do not establish them as hard prohibitions.
+- A valid high budget keeps its points but requires approval; scoring quality and approval authority are distinct.
+- The evaluator accepts structured data only. It does not detect prompt injection, interpret prose, retrieve policy, authorize tools, or persist decisions.
+- Node 24 LTS remains the target, while this local verification host runs Node 25.6.1.
+
+### 13. Next phase
+
+Phase 2 should add a provider-neutral structured extraction boundary and a deterministic MockProvider default. It should validate every extracted object through the Phase 1 schemas and rules before considering bounded plan-and-execute orchestration. Live Anthropic calls, tools, retries, traces, and approvals should be introduced only in later scoped steps with explicit tests and cost controls.
+
+Phase 1 stops here pending review.
