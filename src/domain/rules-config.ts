@@ -1,4 +1,11 @@
-import type { KpiMetric, Objective } from "./schemas.js";
+import {
+  ChannelSchema,
+  CurrencySchema,
+  KpiMetricSchema,
+  ObjectiveSchema,
+  type KpiMetric,
+  type Objective,
+} from "./schemas.js";
 
 export const SYNTHETIC_RULES_DISCLAIMER =
   "SYNTHETIC DEMO RULES — NOT OFFICIAL BULLS VISION GROUP POLICIES.";
@@ -39,8 +46,10 @@ export interface SyntheticRulesConfig {
     };
   };
   readonly readinessThreshold: number;
+  readonly supportedObjectives: readonly string[];
   readonly supportedCurrencies: readonly string[];
   readonly supportedChannels: readonly string[];
+  readonly supportedKpiMetrics: readonly string[];
   readonly countryFormat: "ISO_3166_1_ALPHA_2_UPPERCASE";
   readonly budgetReviewThreshold: number;
   readonly prohibitedCategories: readonly string[];
@@ -121,8 +130,10 @@ export const syntheticRulesConfig = {
     },
   },
   readinessThreshold: 85,
-  supportedCurrencies: ["USD", "EUR", "GBP"],
-  supportedChannels: ["search", "social", "display", "email", "video"],
+  supportedObjectives: ObjectiveSchema.options,
+  supportedCurrencies: CurrencySchema.options,
+  supportedChannels: ChannelSchema.options,
+  supportedKpiMetrics: KpiMetricSchema.options,
   countryFormat: "ISO_3166_1_ALPHA_2_UPPERCASE",
   budgetReviewThreshold: 100_000,
   prohibitedCategories: ["tobacco", "weapons", "illegal_drugs"],

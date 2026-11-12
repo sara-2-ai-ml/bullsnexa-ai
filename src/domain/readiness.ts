@@ -5,6 +5,7 @@ import {
   CampaignReadinessDecisionSchema,
   ChannelSchema,
   CurrencySchema,
+  EvaluationResultSchema,
   IsoDateSchema,
   ObjectiveSchema,
   TargetCountrySchema,
@@ -14,6 +15,7 @@ import {
   type CampaignRisk,
   type CampaignStatus,
   type ClarificationQuestion,
+  type EvaluationResult,
   type ValidationIssue,
   type ValidationResult,
 } from "./schemas.js";
@@ -193,9 +195,14 @@ function inspectBrief(
     const channelNames = raw.channels.filter(
       (channel): channel is string => typeof channel === "string",
     );
-    unsupportedChannelCount = channelNames.filter(
-      (channel) => !config.supportedChannels.includes(channel),
-    ).length;
+    const unsupportedChannels = [
+      ...new Set(
+        channelNames.filter(
+          (channel) => !config.supportedChannels.includes(channel),
+        ),
+      ),
+    ].sort();
+    unsupportedChannelCount = unsupportedChannels.length;
     const parsedChannels = z.array(ChannelSchema).min(1).safeParse(raw.channels);
     if (invalidTypeCount > 0) {
       addInvalid(
@@ -208,8 +215,8 @@ function inspectBrief(
       addInvalid(
         "channels",
         "UNSUPPORTED_CHANNEL",
-        "One or more channels are outside the synthetic supported-channel list.",
-        "Select only search, social, display, email, or video.",
+        `Unsupported channels: ${unsupportedChannels.join(", ")}.`,
+        `Remove or replace unsupported channels: ${unsupportedChannels.join(", ")}. Supported channels are ${config.supportedChannels.join(", ")}.`,
         "REVIEW_REQUIRED",
         config.policies.channels.id,
       );
@@ -303,25 +310,13 @@ function inspectBrief(
     "endDate must be a valid calendar date in YYYY-MM-DD format.",
   );
 
-  const todayResult = IsoDateSchema.safeParse(today);
-  if (!todayResult.success) {
-    issues.push({
-      code: "INVALID_EVALUATION_DATE",
-      fieldPath: "today",
-      severity: "BLOCKER",
-      explanation: "The evaluator today value must be a valid YYYY-MM-DD date.",
-      suggestedAction: "Pass an explicit valid calendar date to the evaluator.",
-      policyRef: requirementsPolicy,
-    });
-  }
-
-  if (startDate && endDate && endDate <= startDate) {
+  if (startDate && endDate && endDate < startDate) {
     issues.push({
       code: "INVALID_DATE_ORDER",
       fieldPath: "endDate",
       severity: "BLOCKER",
-      explanation: "endDate must occur after startDate.",
-      suggestedAction: "Choose an end date after the start date.",
+      explanation: "endDate must occur on or after startDate.",
+      suggestedAction: "Choose an end date on or after the start date.",
       policyRef: requirementsPolicy,
     });
     risks.push({
@@ -330,7 +325,7 @@ function inspectBrief(
       explanation: "The campaign schedule is chronologically impossible.",
       policyRef: requirementsPolicy,
     });
-  } else if (startDate && todayResult.success && startDate < todayResult.data) {
+  } else if (startDate && startDate < today) {
     issues.push({
       code: "START_DATE_IN_PAST",
       fieldPath: "startDate",
@@ -477,20 +472,23 @@ export function determineStatus(inputs: StatusInputs): CampaignStatus {
   return "READY";
 }
 
-export function validateCampaignBrief(
-  brief: unknown,
-  config: SyntheticRulesConfig,
-  today: string,
-): ValidationResult {
-  return inspectBrief(brief, config, today).validationResult;
-}
-
 export function evaluateReadiness(
   brief: unknown,
   config: SyntheticRulesConfig,
   today: string,
-): CampaignReadinessDecision {
-  const inspection = inspectBrief(brief, config, today);
+): EvaluationResult {
+  const todayResult = IsoDateSchema.safeParse(today);
+  if (!todayResult.success) {
+    return EvaluationResultSchema.parse({
+      ok: false,
+      error: {
+        code: "INVALID_EVALUATION_DATE",
+        message: "today must be a valid ISO calendar date in YYYY-MM-DD format.",
+      },
+    });
+  }
+
+  const inspection = inspectBrief(brief, config, todayResult.data);
   const weights = config.score.completeness.fieldWeights;
   const completenessScore = clamp(
     Object.entries(weights).reduce(
@@ -541,9 +539,9 @@ export function evaluateReadiness(
   const endDate = inspection.normalized.endDate;
   let datesScore = 0;
   if (typeof startDate === "string" && typeof endDate === "string") {
-    if (endDate > startDate) {
+    if (endDate >= startDate) {
       datesScore = config.score.policyCompliance.datesMaximum;
-      if (IsoDateSchema.safeParse(today).success && startDate < today) {
+      if (startDate < today) {
         datesScore -= config.score.policyCompliance.deductions.pastStartDate;
       }
     } else {
@@ -639,5 +637,8 @@ export function evaluateReadiness(
     rulesVersion: config.version,
   };
 
-  return CampaignReadinessDecisionSchema.parse(decision);
+  return EvaluationResultSchema.parse({
+    ok: true,
+    decision: CampaignReadinessDecisionSchema.parse(decision),
+  });
 }

@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   determineStatus,
-  evaluateReadiness,
-  validateCampaignBrief,
+  evaluateReadiness as evaluateReadinessResult,
 } from "../src/domain/readiness.js";
-import { syntheticRulesConfig } from "../src/domain/rules-config.js";
+import {
+  syntheticRulesConfig,
+  type SyntheticRulesConfig,
+} from "../src/domain/rules-config.js";
+import type { CampaignReadinessDecision } from "../src/domain/schemas.js";
 
 const TODAY = "2026-01-15";
 const validBrief = {
@@ -21,6 +24,19 @@ const validBrief = {
   targetKpi: { metric: "purchases", targetValue: 1_000 },
   category: "retail",
 } as const;
+
+function evaluateReadiness(
+  brief: unknown,
+  config: SyntheticRulesConfig,
+  today: string,
+): CampaignReadinessDecision {
+  const result = evaluateReadinessResult(brief, config, today);
+  expect(result.ok).toBe(true);
+  if (!result.ok) {
+    throw new Error(`Unexpected technical error: ${result.error.code}`);
+  }
+  return result.decision;
+}
 
 describe("deterministic campaign validation", () => {
   it("distinguishes a missing budget from an invalid budget", () => {
@@ -106,14 +122,26 @@ describe("deterministic campaign validation", () => {
     );
   });
 
-  it("blocks equal start and end dates", () => {
+  it("accepts a valid single-day campaign as READY", () => {
     const result = evaluateReadiness(
       { ...validBrief, startDate: "2026-06-01", endDate: "2026-06-01" },
       syntheticRulesConfig,
       TODAY,
     );
-    expect(result.status).toBe("BLOCKED");
-    expect(result.scoreBreakdown.policyCompliance.score).toBe(20);
+    expect(result.status).toBe("READY");
+    expect(result.score).toBe(100);
+  });
+
+  it("awards all 5 date-policy points to a valid single-day campaign", () => {
+    const result = evaluateReadiness(
+      { ...validBrief, startDate: "2026-06-01", endDate: "2026-06-01" },
+      syntheticRulesConfig,
+      TODAY,
+    );
+    const nonDatePolicyPoints = 8 + 7 + 5;
+    expect(result.scoreBreakdown.policyCompliance.score - nonDatePolicyPoints).toBe(
+      5,
+    );
   });
 
   it("awards no channel policy evidence for an empty channel list", () => {
@@ -153,6 +181,25 @@ describe("deterministic campaign validation", () => {
     );
   });
 
+  it("scores KPI completeness separately from measurable-objective evidence", () => {
+    const complete = evaluateReadiness(
+      validBrief,
+      syntheticRulesConfig,
+      TODAY,
+    );
+    const missingKpi = evaluateReadiness(
+      { ...validBrief, targetKpi: undefined },
+      syntheticRulesConfig,
+      TODAY,
+    );
+    expect(
+      complete.scoreBreakdown.completeness.score -
+        missingKpi.scoreBreakdown.completeness.score,
+    ).toBe(2);
+    expect(complete.scoreBreakdown.measurableObjective.score).toBe(15);
+    expect(missingKpi.scoreBreakdown.measurableObjective.score).toBe(5);
+  });
+
   it("does not claim policy readiness when category is missing", () => {
     const result = evaluateReadiness(
       { ...validBrief, category: undefined },
@@ -181,6 +228,22 @@ describe("deterministic campaign validation", () => {
     );
   });
 
+  it("identifies mixed unsupported channels with actionable feedback", () => {
+    const result = evaluateReadiness(
+      { ...validBrief, channels: ["search", "tiktok", "sms"] },
+      syntheticRulesConfig,
+      TODAY,
+    );
+    const issue = result.validationIssues.find(
+      (candidate) => candidate.code === "UNSUPPORTED_CHANNEL",
+    );
+    expect(issue?.explanation).toBe("Unsupported channels: sms, tiktok.");
+    expect(issue?.suggestedAction).toContain(
+      "Remove or replace unsupported channels: sms, tiktok.",
+    );
+    expect(issue?.explanation).not.toContain(validBrief.targetAudience);
+  });
+
   it("blocks an explicitly prohibited category", () => {
     const result = evaluateReadiness(
       { ...validBrief, category: "tobacco" },
@@ -193,14 +256,25 @@ describe("deterministic campaign validation", () => {
     );
   });
 
-  it("returns a structurally validated brief for complete valid input", () => {
-    const validation = validateCampaignBrief(
+  it("returns a structured technical error for an invalid evaluation date", () => {
+    const result = evaluateReadinessResult(
       validBrief,
       syntheticRulesConfig,
-      TODAY,
+      "2026-02-30",
     );
-    expect(validation.isValid).toBe(true);
-    expect(validation.validatedBrief).toBeDefined();
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "INVALID_EVALUATION_DATE",
+        message: "today must be a valid ISO calendar date in YYYY-MM-DD format.",
+      },
+    });
+    if (result.ok) {
+      expect.fail("Invalid today unexpectedly produced a business decision");
+    } else {
+      expect("decision" in result).toBe(false);
+      expect("score" in result.error).toBe(false);
+    }
   });
 });
 

@@ -4,7 +4,12 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { syntheticRulesConfig } from "../src/domain/rules-config.js";
-import { ChannelSchema, CurrencySchema } from "../src/domain/schemas.js";
+import {
+  ChannelSchema,
+  CurrencySchema,
+  KpiMetricSchema,
+  ObjectiveSchema,
+} from "../src/domain/schemas.js";
 
 describe("synthetic rules consistency", () => {
   it("has an explicit version and disclaimer", () => {
@@ -63,10 +68,27 @@ describe("synthetic rules consistency", () => {
     expect(syntheticRulesConfig.euCountries.codes).toContain("DE");
   });
 
-  it("keeps supported channel and currency schemas aligned with configuration", () => {
+  it("derives supported enum lists from schemas", () => {
+    expect(Object.is(syntheticRulesConfig.supportedObjectives, ObjectiveSchema.options)).toBe(
+      true,
+    );
     expect(ChannelSchema.options).toEqual(syntheticRulesConfig.supportedChannels);
     expect(CurrencySchema.options).toEqual(
       syntheticRulesConfig.supportedCurrencies,
     );
+    expect(KpiMetricSchema.options).toEqual(
+      syntheticRulesConfig.supportedKpiMetrics,
+    );
+  });
+
+  it("maps every objective and KPI metric exactly once", () => {
+    expect(Object.keys(syntheticRulesConfig.kpiMetricsByObjective).sort()).toEqual(
+      [...ObjectiveSchema.options].sort(),
+    );
+    const configuredMetrics = Object.values(
+      syntheticRulesConfig.kpiMetricsByObjective,
+    ).flat();
+    expect(configuredMetrics.sort()).toEqual([...KpiMetricSchema.options].sort());
+    expect(new Set(configuredMetrics).size).toBe(configuredMetrics.length);
   });
 });

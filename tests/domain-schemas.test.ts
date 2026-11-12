@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   CampaignReadinessDecisionSchema,
+  EvaluationResultSchema,
   PartialCampaignBriefSchema,
   TargetKpiSchema,
   ValidatedCampaignBriefSchema,
@@ -70,11 +71,18 @@ describe("campaign domain schemas", () => {
   });
 
   it("validates the structured readiness output schema", () => {
-    const decision = evaluateReadiness(
+    const result = evaluateReadiness(
       validBrief,
       syntheticRulesConfig,
       "2026-01-15",
     );
-    expect(CampaignReadinessDecisionSchema.parse(decision)).toEqual(decision);
+    expect(EvaluationResultSchema.parse(result)).toEqual(result);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      expect.fail(`Unexpected technical error: ${result.error.code}`);
+    }
+    expect(CampaignReadinessDecisionSchema.parse(result.decision)).toEqual(
+      result.decision,
+    );
   });
 });

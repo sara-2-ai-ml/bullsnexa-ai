@@ -36,11 +36,16 @@ describe("campaign evaluation dataset", () => {
     );
 
     for (const item of executable) {
-      const result = evaluateReadiness(
+      const evaluation = evaluateReadiness(
         item.input,
         syntheticRulesConfig,
         dataset.today,
       );
+      expect(evaluation.ok, item.id).toBe(true);
+      if (!evaluation.ok) {
+        throw new Error(`${item.id}: ${evaluation.error.code}`);
+      }
+      const result = evaluation.decision;
       expect(result.status, item.id).toBe(item.expectedOutcome.status);
       expect(item.expectedScoreRange, item.id).toBeDefined();
       expect(result.score, item.id).toBeGreaterThanOrEqual(
@@ -71,11 +76,16 @@ describe("campaign evaluation dataset", () => {
       (candidate) => candidate.id === "case-07-germany-privacy-review",
     );
     expect(item).toBeDefined();
-    const result = evaluateReadiness(
+    const evaluation = evaluateReadiness(
       item?.input,
       syntheticRulesConfig,
       dataset.today,
     );
+    expect(evaluation.ok).toBe(true);
+    if (!evaluation.ok) {
+      throw new Error(evaluation.error.code);
+    }
+    const result = evaluation.decision;
     expect(result.status).toBe("NEEDS_REVIEW");
     expect(result.requiresHumanReview).toBe(true);
     expect(result.validationIssues).toContainEqual(

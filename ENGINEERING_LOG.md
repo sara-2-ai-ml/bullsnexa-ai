@@ -129,7 +129,7 @@ Status: complete locally and awaiting review. Phase 1 adds deterministic campaig
 
 - Runtime Zod schemas for partial and fully validated campaign briefs, objectives, KPI targets, issues, risks, questions, score breakdowns, and decisions.
 - Versioned `syntheticRulesConfig` containing every scoring weight, threshold, supported value, objective/KPI mapping, policy reference, prohibited category, and EU country code used at runtime.
-- Pure `validateCampaignBrief()` and `evaluateReadiness(brief, config, today)` functions.
+- Pure `evaluateReadiness(brief, config, today)` evaluation with an explicit technical success/error result.
 - Five concise synthetic policy documents and an exact 100-point rubric.
 - A 15-case evaluation dataset with 8 executable domain cases and 7 explicitly deferred integration/security cases.
 - Tests for schema behavior, business validation, score boundaries, policy consistency, determinism, and dataset integrity.
@@ -222,7 +222,7 @@ On 2026-11-12, after a clean Phase 1 implementation pass:
 | Policy references | PASS — every configured reference resolves to a synthetic document |
 | Score boundaries | PASS — exact threshold and precedence cases covered |
 
-An added equal-date boundary test initially exposed that validation blocked equal dates while the policy scorer still awarded date points. The scorer was corrected to require `endDate > startDate`, and the full suite then passed. No future integration case is counted as an executed Phase 1 pass.
+An added equal-date boundary test initially exposed an ambiguous date policy. Phase 1 used strict `endDate > startDate`; Phase 1.1 subsequently clarified and implemented equal dates as valid single-day campaigns. No future integration case is counted as an executed Phase 1 pass.
 
 ### 12. Decisions, trade-offs, and limitations
 
@@ -238,3 +238,19 @@ An added equal-date boundary test initially exposed that validation blocked equa
 Phase 2 should add a provider-neutral structured extraction boundary and a deterministic MockProvider default. It should validate every extracted object through the Phase 1 schemas and rules before considering bounded plan-and-execute orchestration. Live Anthropic calls, tools, retries, traces, and approvals should be introduced only in later scoped steps with explicit tests and cost controls.
 
 Phase 1 stops here pending review.
+
+## Phase 1.1 — Final quality and reliability fixes
+
+Phase 1.1 separates technical evaluator failure from business readiness. `evaluateReadiness()` now returns a discriminated union: valid evaluation returns `{ ok: true, decision }`; invalid `today` returns `{ ok: false, error }` with code `INVALID_EVALUATION_DATE`. The failure branch contains no score, campaign status, or synthetic policy issue. Callers and dataset tests narrow `ok` exhaustively before accessing a decision.
+
+Date ordering now permits `endDate === startDate`. A valid single-day campaign receives all 5 date-policy points and can be `READY`; only `endDate < startDate` is blocked. Past-start review behavior is unchanged, and evaluation case 04 remains `BLOCKED` at 95.
+
+Supported objectives, KPI metrics, channels, and currencies in `syntheticRulesConfig` are derived from Zod enum `.options`, eliminating duplicated static lists without introducing a circular import. The KPI-to-objective mapping remains policy-specific. Tests verify all objective keys and every KPI metric are covered exactly once.
+
+Unsupported-channel feedback now reports unique unsupported names in sorted order. For `search`, `tiktok`, and `sms`, the issue states `Unsupported channels: sms, tiktok.` and instructs the caller to remove or replace those values. No unrelated brief content is included.
+
+The evaluator remains pure: `today` is explicit, fixed fixture dates are unchanged, and there is no clock, network, file, randomness, database, or LLM access. A future application boundary or orchestrator must supply the request date.
+
+Verification used Node 25.6.1. The declared Node 24 runtime was not available and therefore remains unverified. The final quality gate passed with 6 test files and 67 tests, plus successful typecheck and production build. The dataset remains exactly 15 cases: 8 executable and 7 deferred.
+
+Phase 1.1 stops here pending review.

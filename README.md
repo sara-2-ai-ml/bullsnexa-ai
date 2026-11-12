@@ -26,6 +26,7 @@ Campaign teams often receive incomplete briefs spread across free-form text. Imp
 - Structured objectives and KPI targets with deterministic compatibility rules.
 - Versioned synthetic rule configuration and policy references.
 - Pure `evaluateReadiness(brief, config, today)` evaluation with no network, database, clock, randomness, or LLM dependency.
+- Discriminated success/error contract that keeps technical evaluator failures separate from campaign business decisions.
 - Explainable 100-point scoring, structured issues/risks/questions, and `READY`, `NEEDS_REVIEW`, or `BLOCKED` status.
 - EU lead-generation privacy-review trigger using a versioned EU country-code list.
 - Fifteen evaluation fixtures: 8 executable domain cases and 7 explicitly deferred integration/security cases.
@@ -92,7 +93,7 @@ The Phase 1 evaluator is currently a domain API, not an HTTP endpoint:
 evaluateReadiness(brief, syntheticRulesConfig, "2026-01-15");
 ```
 
-It returns score components, validation issues, risks, clarification questions, policy references, rule version, human-review state, and a business status.
+Valid evaluation returns `{ ok: true, decision }`, where the decision contains score components, validation issues, risks, clarification questions, policy references, rule version, human-review state, and business status. An invalid `today` returns `{ ok: false, error: { code: "INVALID_EVALUATION_DATE", message } }` with no score or business status.
 
 ## Readiness model
 
@@ -106,9 +107,11 @@ It returns score components, validation issues, risks, clarification questions, 
 | Measurable objective | 15 |
 | **Total** | **100** |
 
-Hard violations—invalid supplied budgets, equal/reversed dates, or prohibited categories—produce `BLOCKED`. Missing critical information produces clarification questions and `NEEDS_REVIEW`. Explicit review triggers, including high budgets, unsupported fields, past start dates, incompatible objective/KPI pairs, and EU lead-generation privacy review, produce `NEEDS_REVIEW` unless a blocker takes precedence. Otherwise, a score of at least 85 is `READY`; low score alone is never `BLOCKED`.
+Hard violations—invalid supplied budgets, reversed dates, or prohibited categories—produce `BLOCKED`. Equal start/end dates are valid single-day campaigns and receive all 5 date-policy points. Missing critical information produces clarification questions and `NEEDS_REVIEW`. Explicit review triggers, including high budgets, unsupported fields, past start dates, incompatible objective/KPI pairs, and EU lead-generation privacy review, produce `NEEDS_REVIEW` unless a blocker takes precedence. Otherwise, a score of at least 85 is `READY`; low score alone is never `BLOCKED`.
 
 Objectives are limited to `leads`, `sales`, `awareness`, `traffic`, and `app_installs`. KPI metrics and their allowed objective mappings are enumerated in the typed configuration. Country inputs use trimmed uppercase ISO alpha-2 codes; country names are not guessed.
+
+Supported objective, KPI, channel, and currency lists in the rules configuration are derived from the Zod enums. The KPI-to-objective mapping remains a policy-specific mapping and is covered by drift tests. Unsupported-channel issues name only the unsupported values in sorted order and tell callers to remove or replace them.
 
 See [docs/rubric.md](./docs/rubric.md) for exact weights, deductions, boundaries, and overlap rules. The runtime source of truth is [src/domain/rules-config.ts](./src/domain/rules-config.ts); synthetic policy documents provide reviewer context but cannot override typed rules.
 
@@ -116,6 +119,8 @@ See [docs/rubric.md](./docs/rubric.md) for exact weights, deductions, boundaries
 
 ```text
 structured partial brief + explicit rules + explicit today
+                 |
+                 +--> invalid today --> technical error (no decision)
                  |
                  v
        field-level Zod validation
@@ -136,6 +141,8 @@ npm run build
 ```
 
 Tests use `Fastify.inject()` for HTTP behavior and local pure functions for the domain layer. They cover schemas, budget/date/category rules, objective/KPI compatibility, score boundaries, the Germany privacy-review case, policy-reference consistency, determinism, and evaluation-dataset integrity. The seven future integration cases are schema-validated fixtures but are not executed or reported as passing agent tests.
+
+For real requests, a future application boundary or orchestrator must supply `today`; the evaluator never substitutes or reads the system date.
 
 ## Optional Anthropic smoke test
 
@@ -169,7 +176,7 @@ Docker remains **NOT VERIFIED** in this workspace because the Docker CLI is unav
 
 ## Limitations and roadmap
 
-- The local host exposes Node 25.6.1 while the project targets Node 24 LTS; Node 24 CI confirmation remains advisable.
+- Verification currently uses Node 25.6.1 while the project targets Node 24 LTS; Node 24 remains unverified in this environment.
 - Phase 1 accepts structured input only; free-text extraction and ambiguity resolution are future agent responsibilities.
 - The country validator enforces the documented alpha-2 format but does not ship a complete ISO country registry.
 - The rules and policy documents are synthetic demonstration material, not business or legal guidance.

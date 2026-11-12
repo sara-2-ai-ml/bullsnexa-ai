@@ -58,7 +58,7 @@ Policy evidence is divided into independent subcomponents:
 | --- | ---: | --- |
 | Category | 8 | Allowed category: 8. Missing/invalid/prohibited: 0. Prohibited is a hard blocker. |
 | Channels | 7 | All supported: 7. Deduct 4 per unsupported channel, capped at 7. Missing/unparseable: 0. |
-| Dates | 5 | Valid, strictly ordered, non-past dates: 5. Past start deducts 3. Equal/reversed dates or unavailable date evidence: 0. |
+| Dates | 5 | Valid same-day or later end date: 5. Past start deducts 3. Reversed dates or unavailable date evidence: 0. |
 | Privacy review | 5 | Objective and country evaluable with no trigger: 5. EU lead-generation trigger deducts 3. Missing/invalid evidence: 0. |
 
 The score never treats unavailable evidence as confirmed compliance: an unevaluable subcomponent gets zero. This can overlap with completeness deductions intentionally—completeness measures input quality, while policy scoring measures whether policy evidence can be established. Within policy compliance, each rule is applied only once and deductions are capped by its subcomponent maximum.
@@ -80,6 +80,14 @@ Policy references:
 | KPI metric is compatible with the objective mapping | 5 |
 
 Supported objectives are `leads`, `sales`, `awareness`, `traffic`, and `app_installs`. KPI metrics and their compatible objectives are explicitly mapped in `src/domain/rules-config.ts`. Missing, unknown, vague, or contradictory values are not inferred from text. An unsupported objective requires clarification. An incompatible objective/KPI pair requires review.
+
+The configuration's supported objective, KPI, channel, and currency lists are derived from the corresponding Zod enum options to prevent duplicate hardcoded lists. The KPI-to-objective mapping is intentionally policy-specific; consistency tests prove that every objective is mapped and every accepted KPI metric appears exactly once.
+
+Unsupported-channel scoring remains conservative: each unique unsupported channel deducts 4 points from the 7-point channel subscore, capped at 7. Issues identify unsupported values deterministically and instruct the caller to remove or replace them.
+
+## Technical evaluation errors
+
+The rubric applies only after `today` passes ISO calendar-date validation. An invalid evaluator date returns `ok: false` with `INVALID_EVALUATION_DATE`; it has no campaign status, score, policy finding, or artificial blocker. A future application boundary must provide the real request date explicitly. The evaluator never reads the system clock.
 
 ## Status precedence and exact boundaries
 
@@ -103,6 +111,8 @@ Low score alone never produces `BLOCKED`. A high score never overrides a blocker
 | 85 | `READY` |
 
 For example, a score of 97 with the EU leads privacy trigger is still `NEEDS_REVIEW`, while a score of 95 with reversed dates is `BLOCKED`.
+
+A same-day campaign with otherwise complete, compliant data scores all 5 date-policy points and can be `READY`.
 
 ## Country format and privacy trigger
 

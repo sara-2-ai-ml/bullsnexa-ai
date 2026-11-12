@@ -176,6 +176,22 @@ export const CampaignReadinessDecisionSchema = z.object({
   rulesVersion: z.string().min(1),
 });
 
+export const TechnicalEvaluationErrorSchema = z.object({
+  code: z.literal("INVALID_EVALUATION_DATE"),
+  message: z.string().min(1),
+});
+
+export const EvaluationResultSchema = z.discriminatedUnion("ok", [
+  z.object({
+    ok: z.literal(true),
+    decision: CampaignReadinessDecisionSchema,
+  }),
+  z.object({
+    ok: z.literal(false),
+    error: TechnicalEvaluationErrorSchema,
+  }),
+]);
+
 export type Objective = z.infer<typeof ObjectiveSchema>;
 export type KpiMetric = z.infer<typeof KpiMetricSchema>;
 export type Channel = z.infer<typeof ChannelSchema>;
@@ -198,3 +214,7 @@ export type CampaignReadinessDecision = z.infer<
   typeof CampaignReadinessDecisionSchema
 >;
 export type CampaignStatus = z.infer<typeof CampaignStatusSchema>;
+export type TechnicalEvaluationError = z.infer<
+  typeof TechnicalEvaluationErrorSchema
+>;
+export type EvaluationResult = z.infer<typeof EvaluationResultSchema>;
