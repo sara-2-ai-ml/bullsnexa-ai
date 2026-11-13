@@ -130,7 +130,7 @@ export const runRoutes: FastifyPluginAsync<RunRoutesOptions> = async (
       return reply
         .type("text/javascript; charset=utf-8")
         .header("x-content-type-options", "nosniff")
-        .header("cache-control", "public, max-age=3600")
+        .header("cache-control", "no-cache")
         .send(await source);
     } catch {
       javascriptCache.delete(name);

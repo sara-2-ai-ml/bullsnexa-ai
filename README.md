@@ -131,6 +131,8 @@ Start the app (`AGENT_PROVIDER=simulated npm start`), sign in, then paste each t
 | 5 | Pick the sample **Prompt injection** | The injected text changes nothing: same decision as the **Complete brief** sample |
 | 6 | After any run, edit the budget field | The result is marked outdated until **Run agent** is pressed again; an earlier approval does not carry over |
 
+More cases (extraction edge cases, every status, approval) are in [docs/TEST_SCENARIOS.md](docs/TEST_SCENARIOS.md).
+
 All commands except the explicitly named live smoke commands use offline providers and require no Anthropic credentials. The browser suite starts its own simulated-provider server with isolated in-memory storage and never loads `.env`.
 
 ### Provider modes
@@ -400,6 +402,8 @@ To check live behavior yourself: put a key and model in `.env`, set `AGENT_PROVI
 4. Exportable reports and a change-and-resubmit flow for corrected briefs.
 5. Metrics and alerting around run outcomes, latency and token usage.
 6. A managed database, migrations and a retention policy.
+7. Confirm the Docker image and the GitHub Actions workflow on their first real runs, and test on Node 24 (the declared target).
+8. Split `public/js/app.js` further as the UI grows, and extend the browser tests beyond Chromium.
 
 ## Real-world usage
 

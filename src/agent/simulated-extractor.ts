@@ -24,6 +24,11 @@ const COUNTRIES: readonly [RegExp, string][] = [
   [/\bgreece\b/i, "GR"],
   [/\bcanada\b/i, "CA"],
   [/\baustralia\b/i, "AU"],
+  [/\bbrazil\b/i, "BR"],
+  [/\bjapan\b/i, "JP"],
+  [/\bmexico\b/i, "MX"],
+  [/\bindia\b/i, "IN"],
+  [/\b(turkey|turkiye)\b/i, "TR"],
 ];
 
 const CHANNELS: readonly [RegExp, string][] = [

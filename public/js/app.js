@@ -275,6 +275,11 @@ async function extractFields() {
   $("exstatus").textContent = "Extracting…";
   try {
     const data = await api.extract(text);
+    const found = (data.extractedFields || []).filter((name) => name !== "additionalNotes");
+    if (found.length === 0) {
+      $("exstatus").textContent = "No campaign details found in that text. Mention the objective, budget, channels, country or dates, or fill in the form.";
+      return;
+    }
     setBrief(data.brief);
     $("exstatus").textContent = "Campaign details added. Please review before continuing.";
     $("status").textContent = "";
@@ -717,6 +722,11 @@ async function init() {
   $("run").addEventListener("click", run);
   document.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); run(); } });
   $("extract").addEventListener("click", extractFields);
+  $("clearfree").addEventListener("click", () => {
+    $("free").value = "";
+    $("exstatus").textContent = "";
+    $("free").focus();
+  });
   try {
     const [cfg, options] = await Promise.all([api.config(), api.formOptions()]);
     FORM_OPTIONS = options;
