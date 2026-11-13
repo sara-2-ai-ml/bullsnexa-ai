@@ -29,32 +29,27 @@ BullsNexa turns a brief — structured or written in plain words — into a **ch
 
 ## How it works
 
-```text
-free text (optional)                structured brief (JSON)
-        |                                   ^
-        v                                   |
-POST /api/extract  --draft brief-->  person reviews / edits
- (one model tool call,                      |
-  every field re-validated)                 v
-                                     POST /api/runs
-                                            |
-                                            v
-                 +-------------- bounded agent loop --------------+
-                 |  model (Claude) or mock PROPOSES the next step |
-                 |        |                                       |
-                 |        v   backend validates, authorizes       |
-                 |  checkCampaignFields  -> missing/invalid fields |
-                 |  searchCampaignPolicies -> cited policy excerpts|
-                 |  evaluateCampaignReadiness -> deterministic rules|
-                 |  createLaunchPlan -> deterministic plan         |
-                 |  ask_user | finish | refuse                     |
-                 +-------------------------------------------------+
-                                            |
-                                            v
-         decision + summary + trace  ->  SQLite history
-                                            |
-                 NEEDS_REVIEW? --yes--> human Approve / Reject
-                                        (bound to a plan hash)
+```mermaid
+flowchart TD
+    A["Free text (optional)"] -->|POST /api/extract<br/>one model tool call,<br/>every field re-validated| B["Draft brief"]
+    B --> C["Person reviews and edits"]
+    F["Structured brief (form or JSON)"] --> C
+    C -->|POST /api/runs| D
+
+    subgraph D["Bounded agent loop (max steps, max tool calls, timeouts, one retry)"]
+        direction TB
+        M["Model (Claude, simulated or mock)<br/>PROPOSES the next step"] --> V["Backend validates and authorizes"]
+        V --> T1["checkCampaignFields<br/>missing or invalid fields"]
+        V --> T2["searchCampaignPolicies<br/>cited policy excerpts"]
+        V --> T3["evaluateCampaignReadiness<br/>deterministic rules"]
+        V --> T4["createLaunchPlan<br/>deterministic plan"]
+        V --> T5["ask_user / finish / refuse"]
+    end
+
+    D --> R["Decision + summary + trace<br/>saved to SQLite history"]
+    R --> H{"Needs approval?"}
+    H -->|"yes (NEEDS_REVIEW)"| P["Human Approve / Reject<br/>bound to a plan hash"]
+    H -->|"no (READY cleared, or BLOCKED not eligible)"| Z["Done"]
 ```
 
 **The core rule: the model proposes, the backend decides.** Status, score, summary, clarification questions, launch plan and handoff state are computed by deterministic code from validated data. A model can choose *which step comes next*; it cannot set a result, skip evaluation, or change campaign data.
@@ -129,9 +124,12 @@ Start the app (`AGENT_PROVIDER=simulated npm start`), sign in, then paste each t
 | 3 | Pick the sample **High budget** | `NEEDS_REVIEW` with a human Approve / Reject step |
 | 4 | In Step 2, set the budget to `-500` and press **Run agent** | `BLOCKED`, no launch plan, no approval possible |
 | 5 | Pick the sample **Prompt injection** | The injected text changes nothing: same decision as the **Complete brief** sample |
-| 6 | After any run, edit the budget field | The result is marked outdated until **Run agent** is pressed again; an earlier approval does not carry over |
+| 6 | `Called "Spring Sale". Audience: students. Budget 5k EUR in Germany.` (a brief with missing fields) | Not `READY`: the agent stops with status `WAITING_FOR_CLARIFICATION` and asks for the missing fields (objective, dates, channels, KPI), each with a **Review field** button |
+| 7 | After any run, edit the budget field | The result is marked outdated until **Run agent** is pressed again; an earlier approval does not carry over |
 
 More cases (extraction edge cases, every status, approval) are in [docs/TEST_SCENARIOS.md](docs/TEST_SCENARIOS.md).
+
+Looking for a requirement-by-requirement map of the take-home brief (what was asked, what we did, where to verify it)? See [docs/ASSIGNMENT_CHECKLIST.md](docs/ASSIGNMENT_CHECKLIST.md).
 
 All commands except the explicitly named live smoke commands use offline providers and require no Anthropic credentials. The browser suite starts its own simulated-provider server with isolated in-memory storage and never loads `.env`.
 
@@ -173,15 +171,7 @@ Sample briefs live in [`examples/briefs`](./examples/briefs) with expected outpu
 | `06-prompt-injection-in-notes` | injection in `additionalNotes` ignored; `NEEDS_REVIEW` (not `READY`) |
 | `free-text/summer-sandals.txt` | extracted into a draft brief, then `READY`, 100 |
 
-Run one yourself (server running, `curl` on bash; PowerShell users can use the UI or `Invoke-RestMethod`):
-
-```bash
-curl -s -X POST http://127.0.0.1:3000/api/runs \
-  -H 'content-type: application/json' \
-  -d "{\"brief\": $(cat examples/briefs/02-high-budget-needs-review.json)}"
-```
-
-The API sits behind the demo sign-in. For `curl`, either start the server with `AUTH=disabled`, or sign in first and reuse the cookie:
+Run one yourself (server running, `curl` on bash; PowerShell users can use the UI or `Invoke-RestMethod`). The API sits behind the demo sign-in, so sign in first and reuse the cookie (or start the server with `AUTH=disabled` and skip the first command):
 
 ```bash
 curl -s -c cookies.txt -H 'content-type: application/json' \
@@ -373,7 +363,7 @@ To check live behavior yourself: put a key and model in `.env`, set `AGENT_PROVI
 ## Trade-offs and decisions
 
 - **One agent, not a multi-agent system.** The task is a short, safety-critical pipeline where deterministic code must stay authoritative. Splitting it across agents would add coordination failure modes without adding capability. The tool registry, typed state and provider interface are the seams where further agents could be added (for example a separate review-summarizer), but nothing here pretends to be multi-agent.
-- **No agent framework.** A small bounded loop is easier to test, bound and explain than a graph runtime for four tools; the provider interface keeps the model swappable.
+- **No agent framework (custom orchestrator).** Instead of adopting a framework such as LangGraph, the OpenAI Agents SDK, Semantic Kernel or OpenClaw, the agent is a small bounded loop (the orchestrator is about 600 lines of TypeScript). For four tools and one workflow it is easier to test, bound and explain than a graph runtime, every guardrail (step and tool-call limits, timeouts, authorization, ordering) is plain code that the tests exercise directly, and the provider interface keeps the model swappable. The cost: no built-in persistence, streaming or multi-agent features, which this task does not need.
 - **LLM at the edges only.** Claude chooses the next step and (optionally) drafts a brief from text. It never produces the decision. This costs flexibility and buys auditability.
 - **Human review of extraction.** Misreading free text is the highest-risk model step, so a person confirms the draft before anything is evaluated, and the evaluator re-checks every field.
 - **`node:sqlite` instead of a native package.** No build toolchain or prebuilt-binary risk; the cost is that the module is still marked experimental and prints a warning.
@@ -383,7 +373,7 @@ To check live behavior yourself: put a key and model in `.env`, set `AGENT_PROVI
 
 ## Limitations
 
-- Live Claude was verified with one smoke run only; Docker and Node 24 are unverified (see above).
+- Live Claude was verified with one agent smoke run and a few manual free-text extraction tries (including non-English and meaningless input). The 15 evaluation cases and extraction quality have not been measured against live Claude. Docker and Node 24 are unverified (see above).
 - One optional shared demo login only: no user accounts, roles, tenant isolation or account lockout, and approvals are not audit-grade (a reviewer name is a label).
 - The country check validates the alpha-2 format only; it does not ship a full country registry.
 - The offline extractor understands simple English and ISO dates only, over a fixed list of countries and categories; the live mode handles free phrasing far better.
@@ -396,7 +386,7 @@ To check live behavior yourself: put a key and model in `.env`, set `AGENT_PROVI
 
 ## Next steps
 
-1. Run the evaluation cases and live free-text extraction against real Claude and measure token cost and latency across them (only one smoke run exists so far).
+1. Run the evaluation cases and live free-text extraction against real Claude and measure token cost and latency across them (so far only one smoke run and a few manual extraction tries exist).
 2. Authentication, roles and per-user approval authority.
 3. Evaluate extraction on real, messy briefs, including non-English text.
 4. Exportable reports and a change-and-resubmit flow for corrected briefs.
