@@ -159,6 +159,26 @@ curl http://127.0.0.1:3000/health
 
 ## Example inputs and expected outputs
 
+### Screenshots
+
+**1. Clean EU lead brief: high score, human privacy review required**
+
+![Clean EU lead brief campaign form](<docs/screenshots/Ready campaign (clean result)1.png>)
+![Clean EU lead brief decision result](<docs/screenshots/Ready campaign (clean result)2.png>)
+![Clean EU lead brief action center](<docs/screenshots/Ready campaign (clean result)3.png>)
+
+**2. Blocked campaign: negative budget and end date before start date**
+
+![Blocked campaign with invalid data](<docs/screenshots/2. Blocked campaign (invalid data).png>)
+
+**3. Missing information: reported as questions, not guessed**
+
+![Campaign with missing information](<docs/screenshots/3. Missing information.png>)
+
+**4. Prompt injection: the instruction in the text is ignored, the rules decide**
+
+![Prompt-injection guardrail test](<docs/screenshots/4. Prompt-injection test (guardrail).png>)
+
 Sample briefs live in [`examples/briefs`](./examples/briefs) with expected outputs in [`examples/expected`](./examples/expected). `npm run examples` re-runs all of them (with a fixed evaluation date, so the outputs do not drift) and fails on any difference. The expected values agree with the independent expectations in `evals/campaign-cases.json`, and the test suite asserts the key outcomes by hand rather than trusting the stored files alone.
 
 | Sample | Expected result |
