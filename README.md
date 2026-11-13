@@ -10,9 +10,10 @@ Note: it runs on a free plan, so the first visit may take about 1 minute to wake
 
 ![BullsNexa home page](docs/screenshots/website_1.png)
 
-![How it works: describe, check, decide](docs/screenshots/website_2.png)
-
-![The app: describe a campaign and get a decision](docs/screenshots/website_3.png)
+<p align="center">
+  <img src="docs/screenshots/website_2.png" alt="How it works: describe, check, decide" width="49%">
+  <img src="docs/screenshots/website_3.png" alt="The app: describe a campaign and get a decision" width="49%">
+</p>
 
 > BullsNexa is an independent technical-assignment prototype. It is not an official Bulls Vision Group product, and its rules and policy documents are **synthetic demonstration material**, not real business or legal guidance.
 
