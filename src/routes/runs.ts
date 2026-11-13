@@ -38,6 +38,20 @@ const ExtractRequestSchema = z
   .object({ text: z.string().trim().min(3).max(MAX_EXTRACTION_INPUT_CHARS) })
   .strict();
 
+const IMAGE_FILES: ReadonlySet<string> = new Set([
+  "billboard-brand.avif",
+  "billboards-london.avif",
+  "building-billboards.avif",
+  "creative-review.avif",
+  "phone-social.avif",
+  "street-gap.avif",
+  "street-ad-panel.avif",
+  "street-night.avif",
+  "times-square.avif",
+  "social-likes.avif",
+  "billboard-blank.avif",
+]);
+
 const PUBLIC_DIRECTORY = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -99,6 +113,36 @@ export const runRoutes: FastifyPluginAsync<RunRoutesOptions> = async (
       return reply.code(404).send({
         error: { code: "NOT_FOUND", message: "Favicon is not available" },
         requestId: _request.id,
+      });
+    }
+  });
+
+  // Decorative photos (Unsplash License, see public/images/CREDITS.txt): a fixed allowlist, served same-origin.
+  const imageCache = new Map<string, Promise<Buffer>>();
+  app.get("/images/:name", async (request, reply) => {
+    const { name } = request.params as { name: string };
+    if (!IMAGE_FILES.has(name)) {
+      return reply.code(404).send({
+        error: { code: "NOT_FOUND", message: "Image is not available" },
+        requestId: request.id,
+      });
+    }
+    let image = imageCache.get(name);
+    if (image === undefined) {
+      image = readFile(path.join(PUBLIC_DIRECTORY, "images", name));
+      imageCache.set(name, image);
+    }
+    try {
+      return reply
+        .type("image/avif")
+        .header("x-content-type-options", "nosniff")
+        .header("cache-control", "public, max-age=86400")
+        .send(await image);
+    } catch {
+      imageCache.delete(name);
+      return reply.code(404).send({
+        error: { code: "NOT_FOUND", message: "Image is not available" },
+        requestId: request.id,
       });
     }
   });

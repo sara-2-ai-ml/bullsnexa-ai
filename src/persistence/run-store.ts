@@ -45,6 +45,8 @@ export interface RunStore {
   getApproval(runId: string): ApprovalRecord | undefined;
   /** Returns false if the run already has a decision. */
   saveApproval(approval: ApprovalRecord): boolean;
+  /** Removes a run with its events and any decision. Returns false if it does not exist. */
+  deleteRun(runId: string): boolean;
   close(): void;
 }
 
@@ -230,6 +232,10 @@ export function createRunStore(location: string = ":memory:"): RunStore {
     "INSERT OR IGNORE INTO approvals (run_id, decision, reviewer, comment, plan_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
   );
 
+  const deleteApprovalRow = db.prepare("DELETE FROM approvals WHERE run_id = ?");
+  const deleteEventRows = db.prepare("DELETE FROM run_events WHERE run_id = ?");
+  const deleteRunRow = db.prepare("DELETE FROM runs WHERE run_id = ?");
+
   const eventsFor = (runId: string): ExecutionEvent[] =>
     (selectEvents.all(runId) as Row[]).map((row) => {
       const parsed = ExecutionEventSchema.safeParse(parseJson(row.event_json));
@@ -297,6 +303,19 @@ export function createRunStore(location: string = ":memory:"): RunStore {
         approval.createdAt,
       );
       return Number(result.changes) === 1;
+    },
+    deleteRun(runId) {
+      db.exec("BEGIN");
+      try {
+        deleteApprovalRow.run(runId);
+        deleteEventRows.run(runId);
+        const result = deleteRunRow.run(runId);
+        db.exec("COMMIT");
+        return Number(result.changes) === 1;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     },
     close() {
       db.close();

@@ -146,6 +146,35 @@ describe("POST /api/runs", () => {
   });
 });
 
+describe("DELETE /api/runs/:runId", () => {
+  it("removes a run and its record, and is 404 the second time", async () => {
+    const app = appWith();
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/runs",
+      payload: { brief: completeBrief },
+    });
+    const { runId } = created.json() as { runId: string };
+
+    const removed = await app.inject({ method: "DELETE", url: `/api/runs/${runId}` });
+    expect(removed.statusCode).toBe(204);
+    expect((await app.inject({ method: "GET", url: `/api/runs/${runId}` })).statusCode).toBe(404);
+    const list = (await app.inject({ method: "GET", url: "/api/runs" })).json() as {
+      runs: { runId: string }[];
+    };
+    expect(list.runs.some((run) => run.runId === runId)).toBe(false);
+
+    const again = await app.inject({ method: "DELETE", url: `/api/runs/${runId}` });
+    expect(again.statusCode).toBe(404);
+    expect(again.json().error.code).toBe("RUN_NOT_FOUND");
+  });
+
+  it("rejects ids that are not run ids", async () => {
+    const response = await appWith().inject({ method: "DELETE", url: "/api/runs/not-a-run" });
+    expect(response.statusCode).toBe(404);
+  });
+});
+
 describe("POST /api/extract", () => {
   const text =
     'Called "Summer Sandals". Objective: sales. Budget 20k EUR on Instagram in Germany, 2027-06-01 to 2027-06-30, aim for 500 purchases. Category: retail.';
@@ -159,6 +188,19 @@ describe("POST /api/extract", () => {
     expect(body.brief.budgetAmount).toBe(20000);
     expect(body.extractedFields).toContain("currency");
     expect(body.notice).toMatch(/Review every field/);
+  });
+
+  it("keeps a minus sign so a negative budget is blocked, not silently turned positive", async () => {
+    const app = appWith();
+    const negative = text.replace("20k EUR", "-500 EUR");
+    const extracted = (
+      await app.inject({ method: "POST", url: "/api/extract", payload: { text: negative } })
+    ).json();
+    expect(extracted.brief.budgetAmount).toBe(-500);
+    const run = (
+      await app.inject({ method: "POST", url: "/api/runs", payload: { brief: extracted.brief } })
+    ).json();
+    expect(run.businessStatus).toBe("BLOCKED");
   });
 
   it("feeds the extracted brief into /api/runs without any shortcut around the evaluator", async () => {
@@ -241,6 +283,36 @@ describe("UI and config", () => {
     expect(page.headers["content-security-policy"]).toContain("img-src 'self'");
     expect(page.headers["content-security-policy"]).toContain("default-src 'none'");
     expect(page.body).toContain('href="/favicon.svg"');
+  });
+
+  it("serves the decorative photos from an allowlist, same-origin only", async () => {
+    for (const name of [
+      "billboard-brand.avif",
+      "billboards-london.avif",
+      "building-billboards.avif",
+      "creative-review.avif",
+      "phone-social.avif",
+      "street-gap.avif",
+      "street-ad-panel.avif",
+      "street-night.avif",
+      "times-square.avif",
+      "social-likes.avif",
+      "billboard-blank.avif",
+    ]) {
+      const image = await appWith().inject({ method: "GET", url: `/images/${name}` });
+      expect(image.statusCode).toBe(200);
+      expect(image.headers["content-type"]).toContain("image/avif");
+      expect(image.headers["x-content-type-options"]).toBe("nosniff");
+      expect(image.rawPayload.length).toBeGreaterThan(1000);
+    }
+    for (const url of ["/images/unknown.avif", "/images/..%2Fapp.html", "/images/CREDITS.txt"]) {
+      const response = await appWith().inject({ method: "GET", url });
+      expect(response.statusCode).toBe(404);
+    }
+    const page = await appWith().inject({ method: "GET", url: "/" });
+    expect(page.headers["content-security-policy"]).toContain("img-src 'self'");
+    expect(page.body).toContain("/images/building-billboards.avif");
+    expect(page.body).not.toMatch(/url\(\s*["']?https?:/);
   });
 
   it("does not load any external resource from either page", async () => {

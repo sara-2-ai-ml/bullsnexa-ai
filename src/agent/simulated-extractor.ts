@@ -56,7 +56,7 @@ function extractFields(text: string): Record<string, unknown> {
 
   const money =
     /([$€£])\s?(\d[\d,]*(?:\.\d+)?)\s?([km])?\b/i.exec(text) ??
-    /(\d[\d,]*(?:\.\d+)?)\s?([km])?\s?(usd|eur|euros?|gbp|dollars?|pounds?)\b/i.exec(text);
+    /(-?\d[\d,]*(?:\.\d+)?)\s?([km])?\s?(usd|eur|euros?|gbp|dollars?|pounds?)\b/i.exec(text);
   if (money) {
     const symbolForm = /^[$€£]$/.test(money[1] ?? "");
     const amount = symbolForm

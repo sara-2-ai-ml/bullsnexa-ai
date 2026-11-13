@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" xmlns:c2pa="http://c2pa.org/manifest">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ff2d75"/></linearGradient></defs>
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#232c5b"/><stop offset="1" stop-color="#7c6fe0"/></linearGradient></defs>
   <rect width="36" height="36" rx="10" fill="url(#g)"/>
   <path d="M7.5 7C7.5 13.2 12 16.4 18 16.4S28.5 13.2 28.5 7" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
   <circle cx="18" cy="24" r="5.2" fill="none" stroke="#fff" stroke-width="3.2"/>

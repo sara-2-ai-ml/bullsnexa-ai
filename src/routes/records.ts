@@ -85,6 +85,17 @@ export const recordRoutes: FastifyPluginAsync<RecordRoutesOptions> = async (
     };
   });
 
+  app.delete("/api/runs/:runId", async (request, reply) => {
+    const id = RunIdSchema.safeParse((request.params as { runId: string }).runId);
+    if (!id.success || !store.deleteRun(id.data)) {
+      return reply.code(404).send({
+        error: { code: "RUN_NOT_FOUND", message: "Run not found" },
+        requestId: request.id,
+      });
+    }
+    return reply.code(204).send();
+  });
+
   app.post(
     "/api/runs/:runId/approval",
     { bodyLimit: 4 * 1024 },

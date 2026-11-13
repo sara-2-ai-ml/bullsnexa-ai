@@ -17,3 +17,8 @@ credentials*.json
 .DS_Store
 .idea/
 .vscode/
+
+# Unsplash+ (premium) photos have a different license; do not commit them
+public/images/premium_*
+# iStock/Getty previews are licensed stock, not free to redistribute; do not commit them
+public/images/istockphoto-*

@@ -1,0 +1,22 @@
+Photos in this folder come from Unsplash and are used under the Unsplash License
+(https://unsplash.com/license): free to use, including commercially, no permission
+or attribution required. They are decorative backgrounds only. Original Unsplash
+file ids:
+
+billboard-brand.avif       photo-1786923228848-6575ea78e8da
+billboards-london.avif     photo-1762417582194-7f0978f43fa0
+building-billboards.avif   photo-1780424588948-48532b93a790
+creative-review.avif       photo-1726594703316-fc9f35c7d80f
+phone-social.avif          photo-1611926653458-09294b3142bf
+street-gap.avif            photo-1616418625298-baef98bc34f8
+street-ad-panel.avif      photo-1610376096719-9819725cfb00
+street-night.avif          photo-1774876237646-31f1bd165dcb
+times-square.avif          photo-1553096442-8fe2118fb927
+
+social-likes.avif          Unsplash+ photo-1684979564941-dbf8664a68fc (Unsplash+ license,
+                           used by the author under her own Unsplash+ terms; not under the
+                           free Unsplash License above)
+billboard-blank.avif       Unsplash+ photo-1680859126164-ac4fd8f56625 (Unsplash+ license, as above)
+
+Some photographs show third-party brands, logos and app icons. BullsNexa is not
+affiliated with, sponsored by or endorsed by any of them.
