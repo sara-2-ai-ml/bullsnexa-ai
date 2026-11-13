@@ -83,7 +83,7 @@ $env:AGENT_PROVIDER="simulated"
 npm start
 ```
 
-Open <http://127.0.0.1:3000> for the home page and press **Open the app** (or go straight to <http://127.0.0.1:3000/app>). Text typed into the home page prompt is carried to the app in the URL fragment, which the browser never sends to the server. In the app, pick a sample brief (or describe a campaign in your own words and press **Extract fields**), press **Run agent**, inspect the verdict, score breakdown, launch plan and trace, and — for `NEEDS_REVIEW` runs — approve or reject. Recent runs are listed under the form.
+Open <http://127.0.0.1:3000> for the home page and press **Open the app** (or go straight to <http://127.0.0.1:3000/app>). In the app, pick a sample brief (or describe a campaign in your own words and press **Extract fields**), press **Run agent**, inspect the verdict, score breakdown, launch plan and trace, and — for `NEEDS_REVIEW` runs — approve or reject. Recent runs are listed under the form.
 
 ### Provider modes
 
@@ -170,6 +170,12 @@ The response also lists the trace: `AGENT_STARTED`, then for each tool `ACTION_P
 
 > The sample dates are in 2027. A start date in the past is itself a review trigger, so after those dates pass, live runs of the samples will change; `npm run examples` is unaffected because it uses a fixed date.
 
+## System Design
+
+For a detailed technical overview of BullsNexa's architecture,
+agent orchestration, security, data flows, and design decisions,
+see [System Design](docs/SYSTEM_DESIGN.md).
+
 ## Architecture
 
 | Area | Path | Responsibility |
@@ -228,6 +234,8 @@ The response also lists the trace: `AGENT_STARTED`, then for each tool `ACTION_P
 | `GET /api/runs` | Last 20 runs. |
 | `GET /api/runs/:id` | One run with trace, plan and approval. |
 | `POST /api/runs/:id/approval` | `{ decision, reviewer, comment?, planHash }`. |
+| `DELETE /api/runs/:id` | Remove a run with its trace and approval (204, or 404). The demo has no authentication. |
+| `GET /images/:name` | Decorative photos from a fixed allowlist (same-origin). |
 
 Errors share one envelope, `{ "error": { "code", "message" }, "requestId" }`, with 400 (invalid input), 404, 409 (approval conflicts), 413 (body too large), 503 (live provider not configured) and 504/502 (extraction timeout/provider error). Body limits: 32 KB runs, 16 KB extract, 4 KB approval.
 
@@ -259,7 +267,7 @@ All tests are offline and deterministic (explicit dates, scripted or simulated p
 
 | Item | Status |
 | --- | --- |
-| Current publication verification on Node 25.6.1 (Windows) | Typecheck and build passed; 17 files / 225 tests, `eval` 15/15, and `examples` 7/7 passed. Node 25 is outside the declared `>=24 <25` engine range. |
+| Current verification on Node 25.6.1 (Windows) | Tests: 17 files / 229 passed (run by the author after the final UI and run-deletion changes). Typecheck, build, `eval` 15/15 and `examples` 7/7 passed in the earlier publication verification on Windows, and `eval` 15/15 and `examples` (all match) were re-run after the final changes on Node 22 (Linux). Node 25 is outside the declared `>=24 <25` engine range. |
 | Earlier verification on Node 22.23.4 (Linux) | 17 files / 213 tests, `eval` 15/15, and all examples passed before the final reliability fixes. |
 | Node 24 LTS (the stated target) | **Not verified.** |
 | Live Claude, one smoke run (`AGENT_PROVIDER=anthropic`, `npm run smoke:agent`, 2026-11-12, author's Windows machine) | **PASS.** One run on the sample complete brief: `COMPLETED`, `READY`, score 100, tools `checkCampaignFields` then `evaluateCampaignReadiness`, 3 provider requests, 6199 input / 55 output tokens. This is a single run, not a quality or robustness evaluation; behavior on other briefs, on injection attempts and on live free-text extraction is covered only by the scripted-protocol tests. |
@@ -267,7 +275,7 @@ All tests are offline and deterministic (explicit dates, scripted or simulated p
 | Docker build and run | **Not verified.** |
 | UI in multiple browsers | Seen in one browser only. |
 
-Current counts on Node 25.6.1: 17 test files, 225 tests; `npm run eval` 15/15; `npm run examples` 7/7. Node 24 remains unverified.
+Current counts on Node 25.6.1 (Windows): 17 test files, 229 tests passed; `npm run eval` 15/15 and `npm run examples` 7/7 (also re-run on Node 22, Linux, after the last changes). Node 24 remains unverified.
 
 To check live behavior yourself: put a key and model in `.env`, set `AGENT_PROVIDER=anthropic`, run `npm run smoke:agent` (one short run; prints status, tools and token usage only, never the key).
 

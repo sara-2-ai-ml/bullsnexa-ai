@@ -4,6 +4,64 @@ Incremental build diary for BullsNexa. This log records what exists, why it exis
 
 > **Reading note.** This log is chronological. Statements in an earlier phase describe the project at that time (for example, test counts or "not yet implemented" items); the README is the current source of truth.
 
+## Current System Snapshot
+
+As of 2026-11-13, BullsNexa is a complete technical-assignment prototype spanning Phases 0–7. It is **not in production today**. Historical sections below remain unchanged as dated records of what existed at each phase; this snapshot describes the current repository.
+
+### Architecture and workflow
+
+The application is a Node.js/Fastify service with a same-origin browser UI, a provider-neutral custom agent orchestrator, deterministic campaign-domain logic, bounded synthetic-policy retrieval, SQLite persistence, and a plan-bound human approval layer. The detailed component, sequence, security, deployment, and design-pattern documentation is maintained in [docs/SYSTEM_DESIGN.md](./docs/SYSTEM_DESIGN.md).
+
+The main workflow is:
+
+1. A user supplies a structured brief or requests natural-language extraction.
+2. Extraction returns a validated, editable draft; it never starts the campaign agent automatically.
+3. The user explicitly runs the agent.
+4. A selected provider proposes one strictly validated action at a time.
+5. The orchestrator authorizes and executes business tools against trusted state.
+6. The deterministic readiness engine produces `READY`, `NEEDS_REVIEW`, or `BLOCKED`, with score, issues, risks, questions, and policy references.
+7. The API builds a deterministic launch plan where permitted, persists the run and trace, and derives the handoff state.
+8. A persisted `NEEDS_REVIEW` run may be approved or rejected by a person; `BLOCKED` and unpersisted runs cannot be approved.
+
+### Providers and authorized tools
+
+Provider modes are `mock` (deterministic offline), `simulated` (offline rule-based client using the Anthropic tool-use protocol), and `anthropic` (real Messages API, explicitly configured, with no silent fallback). The four authorized business tools are:
+
+- `checkCampaignFields` — exposes authoritative field issues and questions without scoring;
+- `searchCampaignPolicies` — returns bounded, cited excerpts from five synthetic policy documents;
+- `evaluateCampaignReadiness` — delegates exclusively to the deterministic domain evaluator;
+- `createLaunchPlan` — derives a deterministic plan after successful evaluation.
+
+Control actions are `ask_user`, `finish`, and `refuse`. The model cannot set a readiness score/status, alter trusted campaign fields or rules through tool arguments, approve a run, publish a campaign, or spend money.
+
+### Reliability, persistence, and security
+
+The orchestrator enforces strict Zod action schemas, tool authorization, tool preconditions, maximum planning steps and tool calls, repeated-action detection, finite provider/tool timeouts, cooperative cancellation, and one narrowly classified transient retry. Trace events record correlation IDs, outcomes, attempts, sanitized error codes, and measured durations where elapsed time exists. Live usage aggregates provider-reported requests and tokens.
+
+SQLite stores runtime-validated runs, ordered trace events, and at most one approval per run. Approval integrity uses the v2 SHA-256 domain `bullsnexa:approval-plan:v2`, binding the specific `runId`, brief, trusted decision, and derived launch plan. Corrupt stored JSON fails closed, concurrent approvals cannot both succeed, and a persisted data change invalidates an earlier approval.
+
+Security boundaries include bounded input, request-size limits, fixed policy paths, strict provider/tool output validation, Pino redaction, no request-body logging, sanitized client errors, same-origin UI requests, restrictive CSP, and text-only dynamic DOM rendering. Production authentication, RBAC, tenant isolation, rate limiting, secret management, immutable auditing, and paid-model quotas are not implemented.
+
+### API, UI, evaluation, and current verification
+
+The API provides health, configuration, extraction, agent execution, history, detail, and approval endpoints. The homepage links to a guided UI that supports extraction, editable form/JSON input, explicit agent execution, decisions, score explanations, risks, launch plans, traces, token usage, history, and approval. Approval controls are hidden when persistence fails.
+
+The offline suite covers domain rules, agent orchestration, Anthropic protocol handling, extraction, policy retrieval, reliability, persistence, approval integrity, API behavior, static Docker configuration, executable examples, and the 15-case evaluation. The latest confirmed publication verification is:
+
+| Check | Current confirmed result |
+| --- | --- |
+| Typecheck | PASS |
+| Automated tests | PASS — 225/225 across 17 files |
+| Agent evaluations | PASS — 15/15 |
+| Executable examples | PASS — 7/7 |
+| Production build | PASS |
+| Verification runtime | Node.js 25.6.1 on Windows |
+| Declared target | Node.js 24; not yet verified |
+| Live Claude | One documented successful smoke run only; not a live evaluation suite |
+| Docker runtime | Not verified; Dockerfile checks are static |
+
+The architecture deliberately uses a small custom orchestrator rather than LangGraph or a multi-agent graph. Confirmed patterns include provider Strategy, environment-backed Factory, explicit State Machine, structured action Command, authorized tool Registry, SQLite Repository, and function/options-based Dependency Injection. Strategy, Factory, and Command are GoF-inspired; State Machine, Registry, and Repository are architectural patterns; Dependency Injection is a composition technique.
+
 ## Phase 0 — Backend foundation
 
 Status: complete, with Docker execution not verified and the optional provider smoke test skipped because credentials were absent.
@@ -376,3 +434,59 @@ Status: complete for documentation; live Claude, Docker and Node 24 remain unver
 **UI (2026-11-12, evening).** The tool UI was redesigned (guided three-step flow, form synchronized with an advanced JSON editor, verdict card, launch plan tiles, approval panel, readable trace) and a home page was added at `/`; the tool moved to `/app`. `npm start` now reads `.env` (before, only `smoke:agent` did, so the server silently ran the default mock provider). Both pages load no external resource and use no `innerHTML`; tests assert both. The UI was checked in headless Chromium against canned API responses at desktop, mobile and dark widths, and the data flow was checked against the real server's routes; it was not exercised end to end in a real browser against live Claude. Home page copy describes audiences as illustrative: the product has no customers.
 
 **Not verified.** Live Claude beyond that single smoke run (evaluation cases, injection, free-text extraction), Docker build/run, Node 24, extraction on messy real text, multiple browsers. **Not in production today.**
+
+## Engineering Closure and Hardening Addendum — 2026-11-13
+
+This addendum records corrections completed after the original phase entries. It does not retroactively change what was available or verified in those phases.
+
+### Phase 3 hardening — Anthropic protocol and live-smoke integrity
+
+- The Claude-facing `refuse` tool schema now requires `code`, matching the strict backend Zod schema and its fixed refusal-code mapping. This prevents a schema mismatch from producing an apparently valid but backend-invalid refusal.
+- The opt-in live smoke reports PASS only when the provider mode is actually `anthropic`, execution is `COMPLETED`, the final decision passes `CampaignReadinessDecisionSchema`, the fixture is `READY`, the required business tools succeeded, and real request/token usage proves a completed tool-use workflow. It does not silently use `MockProvider` and was not invoked during offline verification.
+- Protocol coverage includes a response containing text plus one valid `tool_use` block. The provider safely ignores non-authoritative text and maps the validated tool block; text never becomes a command or decision.
+- Tool-use transcript handling preserves matching `tool_use_id`/`tool_result` pairs and commits conversation history only after a successful provider response. Retries therefore do not duplicate or corrupt the trusted transcript.
+
+These changes matter because provider-facing JSON Schema, backend validation, transcript continuity, and smoke-test claims must agree. A connectivity response alone is not proof that the real agent workflow completed correctly.
+
+### Phase 4 hardening — extraction accuracy and cancellation
+
+- Trusted backend validation now enforces field-specific extraction limits: campaign name 120 characters, audience 300, and category 80. Invalid model values are dropped and reported instead of truncated into different data.
+- An already-aborted `AbortSignal` is rejected before initiating an Anthropic request. Focused coverage confirms zero provider calls in this condition.
+- Ambiguous or yearless campaign dates remain missing for human confirmation; the simulated extractor no longer guesses a year.
+- Extraction still produces only a reviewable partial draft. The UI requires the user to review/edit it and explicitly choose **Run agent**; extraction cannot evaluate, approve, or publish a campaign.
+
+These corrections prevent syntactically convenient but semantically invented campaign data from crossing the trusted intake boundary.
+
+### Phase 5 hardening — persisted-data and approval integrity
+
+- SQLite JSON is parsed and validated through runtime Zod schemas before becoming a stored run, event, or approval. Corrupt JSON and schema-invalid records are rejected and cannot derive `CLEARED` or approval eligibility.
+- Approval hashes were upgraded to v2: SHA-256 covers a versioned domain separator, `runId`, brief, trusted decision, and derived launch plan. Identical campaign content in separate runs therefore receives different hashes, and legacy unbound hashes fail safely.
+- Approval insertion relies on the one-row-per-run database constraint and atomic result handling, so only one concurrent approval attempt succeeds.
+- Handoff derivation recomputes the current v2 hash on reads and writes. A real change to persisted brief/decision/plan data yields `APPROVAL_INVALIDATED`.
+- When a run cannot be persisted, the API returns `persisted: false`, the UI explains that approval/history are unavailable, and approval controls are not rendered. The records API has no run to approve.
+
+These changes matter because approval is a security decision over exact persisted evidence, not a reusable label attached to similar content.
+
+### Phase 6 hardening — evaluation claim accuracy
+
+- The Phase 6 runner invokes the agent for all 15 cases. Cases 01–08 are deterministic business workflows under mock and simulated-Claude providers. Cases 09–14 exercise prompt/policy injection, missing policy, timeout, malformed provider output, and unauthorized-tool boundaries. Case 15 invokes the agent and combines its result with approval-integrity checks.
+- Cases 09–15 deliberately retain their historical Phase 1 `FUTURE_INTEGRATION_CASE` and `NOT_EXECUTED` metadata. An explicit note in `evals/campaign-cases.json` distinguishes that legacy classification from current Phase 6 execution.
+- Not every case is a complete HTTP end-to-end test. A separate integration test covers free-text extraction, agent execution, approval, and history through the API.
+- The recorded FINISH-guard mutation was a historical one-off manual check: changing the expected error caused case 09 to fail and was reverted. It is not an automated mutation-testing framework or suite.
+
+These clarifications preserve the original dataset history while preventing deferred metadata or manual experiments from being misreported as current execution status or automated coverage.
+
+### Phase 7 closure — documentation, examples, UI, and publication
+
+- The README is the concise entry point for setup, provider modes, runnable examples, verification evidence, limitations, and real-world production requirements.
+- [docs/SYSTEM_DESIGN.md](./docs/SYSTEM_DESIGN.md) is the deep technical reference. It documents system context, components, state/action contracts, Anthropic protocol, tools, extraction, domain logic, policy trust boundaries, sequences, SQLite, approval, API, security threats, reliability, tracing, evaluations, deployment, ADRs, and confirmed design patterns.
+- Six structured briefs execute through both mock and simulated providers; one free-text example runs extraction followed by agent execution. Stored expected outputs are compared with actual results and independently asserted. A mismatch exits nonzero.
+- The homepage and guided UI provide editable brief intake, explicit extraction and agent actions, readable decisions, launch plans, traces, history, and approval. Dynamic user/server content is rendered as text rather than HTML.
+- Final documentation corrections distinguish current verification from historical counts, document the run-bound v2 approval hash accurately, clarify all 15 evaluation paths, and identify the manual mutation experiment honestly.
+- Before publication, the exact reviewed file allowlist, staged diff, Git identity, ignore rules, and staged content were checked. `.env`, databases, logs, credentials, dependencies, and build output were excluded. The final publication commit was pushed without force after local, tracking, and GitHub hashes matched.
+
+### Final verified state and remaining limitations
+
+The latest confirmed offline result remains 225/225 tests across 17 files, 15/15 evaluation cases, 7/7 examples, successful typecheck, and successful production build on Node.js 25.6.1. The single documented live Claude smoke proves one real tool-use workflow and its reported usage; it does not establish live extraction quality, adversarial robustness, or broad model reliability.
+
+Node.js 24, a real Docker image/container health check, broad browser compatibility, load behavior, authentication, authorization, tenant isolation, rate limiting, model-cost governance, production secret management, database migration/backup, and real policy/legal validation remain unverified or unimplemented. BullsNexa has no advertising-platform integration and cannot publish campaigns or spend money. **Not in production today.**
