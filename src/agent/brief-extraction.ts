@@ -31,11 +31,14 @@ export type ExtractionErrorCode =
 /** Sanitized failure. Never carries prompts, credentials or provider bodies. */
 export class BriefExtractionError extends Error {
   readonly code: ExtractionErrorCode;
+  /** Safe diagnostic only: HTTP status and error class, never bodies or keys. */
+  readonly detail?: string;
 
-  constructor(code: ExtractionErrorCode, message: string) {
+  constructor(code: ExtractionErrorCode, message: string, detail?: string) {
     super(message);
     this.name = "BriefExtractionError";
     this.code = code;
+    if (detail !== undefined) this.detail = detail;
   }
 }
 
@@ -122,6 +125,15 @@ const TOOL_DEFINITION: Anthropic.Messages.Tool = {
     },
   },
 };
+
+function describeProviderFailure(cause: unknown): string {
+  const name = cause instanceof Error ? cause.name : typeof cause;
+  const status =
+    typeof cause === "object" && cause !== null && "status" in cause
+      ? (cause as { status?: unknown }).status
+      : undefined;
+  return typeof status === "number" ? `${name} HTTP ${status}` : name;
+}
 
 function escapeDelimiters(text: string): string {
   return text.replace(/</g, "\\u003c");
@@ -223,7 +235,7 @@ export function createBriefExtractor(options: BriefExtractorOptions): BriefExtra
           },
           { signal: controller.signal },
         );
-      } catch {
+      } catch (cause) {
         if (controller.signal.aborted) {
           throw new BriefExtractionError(
             "EXTRACTION_TIMEOUT",
@@ -233,6 +245,7 @@ export function createBriefExtractor(options: BriefExtractorOptions): BriefExtra
         throw new BriefExtractionError(
           "EXTRACTION_PROVIDER_ERROR",
           "The extraction provider request failed.",
+          describeProviderFailure(cause),
         );
       } finally {
         clearTimeout(timer);

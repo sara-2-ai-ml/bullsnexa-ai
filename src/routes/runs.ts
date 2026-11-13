@@ -7,6 +7,8 @@ import { z } from "zod";
 
 import { computePlanHash, deriveHandoff } from "../approval/handoff.js";
 import { createLaunchPlan } from "../domain/launch-plan.js";
+import { assessPlanQuality } from "../domain/plan-quality.js";
+import { syntheticRulesConfig } from "../domain/rules-config.js";
 import type { RunStore } from "../persistence/run-store.js";
 
 import {
@@ -24,6 +26,10 @@ export interface RunRoutesOptions {
   readonly createProvider: () => AgentProvider;
   /** Persists runs, events and approvals. */
   readonly store: RunStore;
+  /** Reported to the UI so it can hide the delete control. */
+  readonly deletionEnabled?: boolean;
+  /** Reported to the UI so it can show a sign-out control. */
+  readonly authRequired?: boolean;
   /** Creates the free-text brief extractor. */
   readonly createExtractor: () => BriefExtractor;
   /** Application-boundary clock; injected so tests stay deterministic. */
@@ -50,6 +56,13 @@ const IMAGE_FILES: ReadonlySet<string> = new Set([
   "times-square.avif",
   "social-likes.avif",
   "billboard-blank.avif",
+]);
+
+const JAVASCRIPT_FILES: ReadonlySet<string> = new Set([
+  "api-client.js",
+  "app.js",
+  "campaign-validation.js",
+  "decision-model.js",
 ]);
 
 const PUBLIC_DIRECTORY = path.resolve(
@@ -80,7 +93,7 @@ export const runRoutes: FastifyPluginAsync<RunRoutesOptions> = async (
           .header("x-content-type-options", "nosniff")
           .header(
             "content-security-policy",
-            "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'",
+            "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'",
           )
           .send(html);
       } catch {
@@ -96,6 +109,37 @@ export const runRoutes: FastifyPluginAsync<RunRoutesOptions> = async (
   // "/" is the home page; "/app" is the working tool.
   servePage("/", "index.html");
   servePage("/app", "app.html");
+  servePage("/login", "login.html");
+
+  // Frontend modules: fixed allowlist prevents path traversal and accidental file exposure.
+  const javascriptCache = new Map<string, Promise<string>>();
+  app.get("/js/:name", async (request, reply) => {
+    const { name } = request.params as { name: string };
+    if (!JAVASCRIPT_FILES.has(name)) {
+      return reply.code(404).send({
+        error: { code: "NOT_FOUND", message: "Script is not available" },
+        requestId: request.id,
+      });
+    }
+    let source = javascriptCache.get(name);
+    if (source === undefined) {
+      source = readFile(path.join(PUBLIC_DIRECTORY, "js", name), "utf8");
+      javascriptCache.set(name, source);
+    }
+    try {
+      return reply
+        .type("text/javascript; charset=utf-8")
+        .header("x-content-type-options", "nosniff")
+        .header("cache-control", "public, max-age=3600")
+        .send(await source);
+    } catch {
+      javascriptCache.delete(name);
+      return reply.code(404).send({
+        error: { code: "NOT_FOUND", message: "Script is not available" },
+        requestId: request.id,
+      });
+    }
+  });
 
   // Favicon: the only image the pages load, served from the same origin.
   let faviconCache: Promise<string> | undefined;
@@ -149,8 +193,21 @@ export const runRoutes: FastifyPluginAsync<RunRoutesOptions> = async (
 
   app.get("/api/config", async () => {
     const provider = options.createProvider();
-    return { providerMode: provider.mode ?? "custom", today: today() };
+    return {
+      providerMode: provider.mode ?? "custom",
+      today: today(),
+      deletionEnabled: options.deletionEnabled ?? true,
+      authRequired: options.authRequired ?? false,
+    };
   });
+
+  app.get("/api/form-options", async () => ({
+    objectives: syntheticRulesConfig.supportedObjectives,
+    currencies: syntheticRulesConfig.supportedCurrencies,
+    channels: syntheticRulesConfig.supportedChannels,
+    kpiMetricsByObjective: syntheticRulesConfig.kpiMetricsByObjective,
+    countryFormat: syntheticRulesConfig.countryFormat,
+  }));
 
   app.post("/api/extract", { bodyLimit: 16 * 1024 }, async (request, reply) => {
     const parsed = ExtractRequestSchema.safeParse(request.body);
@@ -192,6 +249,7 @@ export const runRoutes: FastifyPluginAsync<RunRoutesOptions> = async (
         });
       }
       if (error instanceof BriefExtractionError) {
+        request.log.warn({ code: error.code, detail: error.detail }, "extraction failed");
         const status =
           error.code === "EXTRACTION_INPUT_INVALID"
             ? 400
@@ -233,9 +291,10 @@ export const runRoutes: FastifyPluginAsync<RunRoutesOptions> = async (
     }
 
     const startedAt = performance.now();
+    const evaluationDate = today();
     const result = await runCampaignAgent({
       brief: parsed.data.brief,
-      today: today(),
+      today: evaluationDate,
       provider,
     });
     const totalDurationMs = Math.round(performance.now() - startedAt);
@@ -315,6 +374,7 @@ export const runRoutes: FastifyPluginAsync<RunRoutesOptions> = async (
       planHash,
       launchPlan: launchPlan?.ok ? launchPlan.plan : undefined,
       launchPlanUnavailable: launchPlan && !launchPlan.ok ? launchPlan.reason : undefined,
+      planQuality: assessPlanQuality(parsed.data.brief, result.finalDecision, evaluationDate),
       handoff,
       persisted,
     };

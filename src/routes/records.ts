@@ -7,10 +7,13 @@ import {
   deriveHandoff,
 } from "../approval/handoff.js";
 import { createLaunchPlan } from "../domain/launch-plan.js";
+import { assessPlanQuality } from "../domain/plan-quality.js";
 import type { RunStore, StoredRun } from "../persistence/run-store.js";
 
 export interface RecordRoutesOptions {
   readonly store: RunStore;
+  /** When false, DELETE /api/runs/:runId is refused with 403. */
+  readonly deletionEnabled: boolean;
 }
 
 const RunIdSchema = z.string().uuid();
@@ -30,7 +33,7 @@ function describe(store: RunStore, run: StoredRun) {
 
 export const recordRoutes: FastifyPluginAsync<RecordRoutesOptions> = async (
   app,
-  { store },
+  { store, deletionEnabled },
 ) => {
   app.get("/api/runs", async () => ({
     runs: store.listRuns(LIST_LIMIT).map((run) => ({
@@ -80,12 +83,19 @@ export const recordRoutes: FastifyPluginAsync<RecordRoutesOptions> = async (
       planHash,
       launchPlan: launchPlan?.ok ? launchPlan.plan : undefined,
       launchPlanUnavailable: launchPlan && !launchPlan.ok ? launchPlan.reason : undefined,
+      planQuality: assessPlanQuality(run.brief, run.decision, run.createdAt.slice(0, 10)),
       handoff,
       approval,
     };
   });
 
   app.delete("/api/runs/:runId", async (request, reply) => {
+    if (!deletionEnabled) {
+      return reply.code(403).send({
+        error: { code: "DELETION_DISABLED", message: "Deleting runs is disabled on this server" },
+        requestId: request.id,
+      });
+    }
     const id = RunIdSchema.safeParse((request.params as { runId: string }).runId);
     if (!id.success || !store.deleteRun(id.data)) {
       return reply.code(404).send({

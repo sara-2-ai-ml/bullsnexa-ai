@@ -38,6 +38,14 @@ export interface StoredRun {
   readonly events: readonly ExecutionEvent[];
 }
 
+export interface RunStats {
+  readonly totalRuns: number;
+  readonly byExecutionStatus: Record<string, number>;
+  readonly byBusinessStatus: Record<string, number>;
+  readonly averageDurationMs: number | null;
+  readonly approvals: { readonly approved: number; readonly rejected: number };
+}
+
 export interface RunStore {
   saveRun(run: StoredRun): void;
   getRun(runId: string): StoredRun | undefined;
@@ -47,6 +55,8 @@ export interface RunStore {
   saveApproval(approval: ApprovalRecord): boolean;
   /** Removes a run with its events and any decision. Returns false if it does not exist. */
   deleteRun(runId: string): boolean;
+  /** Aggregate counts only; never returns brief content. */
+  stats(): RunStats;
   close(): void;
 }
 
@@ -236,6 +246,15 @@ export function createRunStore(location: string = ":memory:"): RunStore {
   const deleteEventRows = db.prepare("DELETE FROM run_events WHERE run_id = ?");
   const deleteRunRow = db.prepare("DELETE FROM runs WHERE run_id = ?");
 
+  const countByExecution = db.prepare(
+    "SELECT execution_status AS k, COUNT(*) AS n FROM runs GROUP BY execution_status",
+  );
+  const countByBusiness = db.prepare(
+    "SELECT business_status AS k, COUNT(*) AS n FROM runs WHERE business_status IS NOT NULL GROUP BY business_status",
+  );
+  const averageDuration = db.prepare("SELECT AVG(total_duration_ms) AS a, COUNT(*) AS n FROM runs");
+  const countApprovals = db.prepare("SELECT decision AS k, COUNT(*) AS n FROM approvals GROUP BY decision");
+
   const eventsFor = (runId: string): ExecutionEvent[] =>
     (selectEvents.all(runId) as Row[]).map((row) => {
       const parsed = ExecutionEventSchema.safeParse(parseJson(row.event_json));
@@ -316,6 +335,19 @@ export function createRunStore(location: string = ":memory:"): RunStore {
         db.exec("ROLLBACK");
         throw error;
       }
+    },
+    stats() {
+      const toRecord = (rows: Row[]): Record<string, number> =>
+        Object.fromEntries(rows.map((row) => [String(row.k), Number(row.n)]));
+      const avg = averageDuration.get() as Row;
+      const approvals = toRecord(countApprovals.all() as Row[]);
+      return {
+        totalRuns: Number(avg.n),
+        byExecutionStatus: toRecord(countByExecution.all() as Row[]),
+        byBusinessStatus: toRecord(countByBusiness.all() as Row[]),
+        averageDurationMs: avg.a === null ? null : Math.round(Number(avg.a)),
+        approvals: { approved: approvals.APPROVED ?? 0, rejected: approvals.REJECTED ?? 0 },
+      };
     },
     close() {
       db.close();

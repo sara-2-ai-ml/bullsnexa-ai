@@ -190,6 +190,20 @@ describe("POST /api/extract", () => {
     expect(body.notice).toMatch(/Review every field/);
   });
 
+  it("recognizes more categories and countries in plain text", async () => {
+    const extracted = (
+      await appWith().inject({
+        method: "POST",
+        url: "/api/extract",
+        payload: {
+          text: 'Called "Cloud Launch". Objective: leads. Budget 18k EUR on Google in the Netherlands, 2027-04-05 to 2027-05-05, aim for 400 leads. Category: software.',
+        },
+      })
+    ).json();
+    expect(extracted.brief.category).toBe("software");
+    expect(extracted.brief.targetCountry).toBe("NL");
+  });
+
   it("keeps a minus sign so a negative budget is blocked, not silently turned positive", async () => {
     const app = appWith();
     const negative = text.replace("20k EUR", "-500 EUR");
@@ -260,16 +274,62 @@ describe("UI and config", () => {
   });
 
   it("serves the working tool at /app with a restrictive CSP", async () => {
-    const response = await appWith().inject({ method: "GET", url: "/app" });
+    const app = appWith();
+    const response = await app.inject({ method: "GET", url: "/app" });
+    const script = await app.inject({ method: "GET", url: "/js/app.js" });
+    const validation = await app.inject({ method: "GET", url: "/js/campaign-validation.js" });
+    const api = await app.inject({ method: "GET", url: "/js/api-client.js" });
+    const source = response.body + script.body + validation.body + api.body;
 
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toContain("text/html");
     expect(response.headers["content-security-policy"]).toContain("default-src 'none'");
     expect(response.headers["x-content-type-options"]).toBe("nosniff");
     expect(response.body).toContain("Run agent");
-    expect(response.body).toContain("/api/runs");
-    expect(response.body).toContain("data.persisted !== false");
-    expect(response.body).not.toMatch(/innerHTML|insertAdjacentHTML|document\.write/);
+    expect(response.body).toContain('type="module" src="/js/app.js"');
+    expect(script.statusCode).toBe(200);
+    expect(script.headers["content-type"]).toContain("text/javascript");
+    expect(source).toContain("/api/runs");
+    expect(source).toContain("data.persisted !== false");
+    expect(source).toContain("Campaign details added. Please review before continuing.");
+    expect(source).not.toContain("field(s) extracted by");
+    expect(source).not.toContain("Dropped invalid:");
+    expect(response.body).toContain("Campaign basics");
+    expect(response.body).toContain("Audience &amp; channels");
+    expect(response.body).toContain("Budget &amp; success metrics");
+    expect(response.body).toContain("Schedule &amp; additional details");
+    expect(response.body).toContain('role="alert"');
+    expect(source).toContain('input.type = "checkbox"');
+    expect(source).toContain("updateKpiOptions");
+    expect(source).toContain("countryCode");
+    expect(source).toContain("campaignDateState");
+    expect(source).toContain("Date.UTC");
+    expect(source).toContain("const brief = formToBrief()");
+    expect(source).toContain("JSON.stringify({ brief })");
+    expect(source).not.toContain("Advanced: edit the raw JSON");
+    expect(source).not.toContain('id="brief"');
+    expect(source).not.toContain('$("brief")');
+    expect(source).not.toMatch(/innerHTML|insertAdjacentHTML|document\.write/);
+    expect((await app.inject({ method: "GET", url: "/js/../server.js" })).statusCode).toBe(404);
+  });
+
+  it("serves form options from the trusted rules configuration", async () => {
+    const response = await appWith().inject({ method: "GET", url: "/api/form-options" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      objectives: ["leads", "sales", "awareness", "traffic", "app_installs"],
+      currencies: ["USD", "EUR", "GBP"],
+      channels: ["search", "social", "display", "email", "video"],
+      kpiMetricsByObjective: {
+        leads: ["leads", "cost_per_lead"],
+        sales: ["purchases", "revenue", "return_on_ad_spend"],
+        awareness: ["impressions", "reach"],
+        traffic: ["clicks", "sessions"],
+        app_installs: ["installs", "cost_per_install"],
+      },
+      countryFormat: "ISO_3166_1_ALPHA_2_UPPERCASE",
+    });
   });
 
   it("serves the favicon from the same origin and allows only same-origin images", async () => {
@@ -323,9 +383,14 @@ describe("UI and config", () => {
     }
   });
 
-  it("exposes only the provider mode and today's date", async () => {
+  it("exposes only the provider mode, today's date and two UI switches", async () => {
     const response = await appWith().inject({ method: "GET", url: "/api/config" });
 
-    expect(response.json()).toEqual({ providerMode: "mock", today: "2026-01-15" });
+    expect(response.json()).toEqual({
+      providerMode: "mock",
+      today: "2026-01-15",
+      deletionEnabled: true,
+      authRequired: false,
+    });
   });
 });

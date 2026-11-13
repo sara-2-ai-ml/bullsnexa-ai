@@ -289,6 +289,10 @@ internal demonstration trigger, not a claim that EU lead generation is illegal.
 The engine returns a discriminated success/error result. Invalid evaluation
 dates produce a technical error with no score or business status.
 
+### Advisory plan quality
+
+`assessPlanQuality()` in `src/domain/plan-quality.ts` is a second pure function over the validated brief, the trusted decision and the explicit date. The readiness score measures whether a brief may launch, so every sound brief scores 100; plan quality measures how sensible it looks (KPI realism against synthetic cost-per-result ranges, budget per day, flight length, lead time, channel count, audience detail). It is returned beside the launch plan, is recomputed for stored runs, and is excluded from the decision object, the status and the approval hash, so it cannot affect approval. Blocked or not fully valid briefs get no assessment.
+
 ## 14. Synthetic Policy Retrieval and Trust Boundaries
 
 Policy search reads the five configured Markdown documents under
@@ -463,7 +467,10 @@ deployment requires real identity, authorization, and an audit-grade event log.
 | `GET` | `/api/runs` | List the latest 20 runs. |
 | `GET` | `/api/runs/:runId` | Run detail, trace, plan, handoff, approval. |
 | `POST` | `/api/runs/:runId/approval` | Record one approval decision. |
-| `DELETE` | `/api/runs/:runId` | Remove a run, its trace events and any approval (204, or 404). Unauthenticated, like the rest of the API. |
+| `DELETE` | `/api/runs/:runId` | Remove a run, its trace events and any approval (204, 404, or 403 when deletion is disabled). |
+| `GET` | `/api/metrics` | Request counters per route template and status, plus aggregate run counts. |
+| `POST` | `/api/login`, `/api/logout` | Only registered when a shared demo login is configured. |
+| `GET` | `/login` | Sign-in page. |
 | `GET` | `/images/:name` | Decorative photos from a fixed allowlist; same-origin, `image/avif`. |
 
 Top-level request schemas are strict. Body limits are 16 KiB for extraction,
@@ -482,15 +489,26 @@ sent to API clients.
 | Model tampers with business decision | Control tools accept no status/score; evaluator and summary are backend-owned. | Rule configuration governance is not implemented. |
 | Malformed model output | Exact tool-use parsing and strict Zod validation; safe technical failure. | No semantic guarantee for extracted prose beyond human review. |
 | Duplicate/conflicting approvals | One row per run, atomic insert, current hash comparison. | No authenticated reviewer identity. |
+| Destructive API use | Deletion can be switched off per deployment (`RUN_DELETION=disabled` → 403), and the UI hides the control. | When enabled there is no per-user authorization beyond the shared login, and no soft delete or tombstone. |
 | Stored-record corruption | Runtime validation on deserialization; malformed records fail closed. | No migrations, backup, or operational repair tooling. |
 | Secret exposure | `.env` ignored; Pino redaction; no request bodies; safe client errors; no client-side keys. | Production secret manager is not provided. |
-| Unauthenticated API use | Deployment limitation is explicit; approval is deterministic and plan-bound. | Authentication, RBAC, CSRF policy, and tenant isolation are absent. |
-| Excessive paid-model requests | Provider mode is server-selected; bounded steps/retries/tokens/timeouts. | No authentication, rate limiting, quota, or budget circuit breaker. |
+| Unauthenticated API use | Optional shared demo login: signed, expiring `HttpOnly`/`SameSite=Strict` session cookie, constant-time credential comparison, 10 sign-in attempts per minute. `/app` and every `/api` route except `/api/login` require it. | One shared account only: no user identity, roles, tenant isolation, password reset or lockout. `SameSite=Strict` is the only CSRF control. |
+| Excessive paid-model requests | Provider mode is server-selected; bounded steps/retries/tokens/timeouts; 60 `POST`/`DELETE` per minute per client, answered with 429 and `Retry-After`. | The limiter is a fixed window in process memory: no shared store across instances, no per-tenant quota or budget circuit breaker. |
+
+### Request pipeline order
+
+Hooks run before any route handler, in this order:
+
+1. **Rate limiting** — so unauthenticated floods and password guessing are throttled before anything else. `/api/login` has its own stricter window.
+2. **Authentication** — when a shared login is configured: `/app` redirects to `/login`, `/api/*` (except `/api/login`) answers 401.
+3. **Route handler** — its own strict Zod validation and body limit.
+4. **Response counter** — records method, route template and status.
 
 The UI uses same-origin requests, text-only DOM construction for dynamic data,
-no external resources, and a restrictive CSP. Inline script/style allowances
-exist because the UI is packaged as standalone HTML; production could replace
-them with separate assets and hashes or nonces.
+no external resources, and a restrictive CSP. Application JavaScript is split
+into focused ES modules served from a fixed allowlist under `/js`; styles and
+the smaller home/sign-in scripts remain inline. A future hardening pass could
+move those remaining inline assets behind hashes or nonces.
 
 ## 20. Reliability, Retry, Timeout and Cancellation
 
@@ -520,6 +538,8 @@ Typical events are:
 
 `AGENT_STARTED` → `ACTION_PROPOSED` → `TOOL_STARTED` →
 `TOOL_SUCCEEDED`/`TOOL_FAILED` → `AGENT_COMPLETED`/`AGENT_FAILED`.
+
+`GET /api/metrics` adds operational counters: requests by method, route template and status code, the number of rate-limited requests, process uptime, and aggregate run counts by execution and business status. Route templates are used as labels so ids and query strings cannot grow the label set, and no brief content is exposed. There are no histograms, percentiles, spans or exporters.
 
 Provider usage aggregates request, input-token, and output-token counts when
 reported by the live API. Offline modes are labeled and do not claim model
@@ -569,6 +589,12 @@ The multi-stage Dockerfile uses Node 24 Bookworm slim:
 | `HOST` | `127.0.0.1` | Listen address; Docker overrides to `0.0.0.0`. |
 | `PORT` | `3000` | HTTP port. |
 | `DATABASE_PATH` | `var/bullsnexa.sqlite` | SQLite location. |
+| `AUTH_USERNAME`, `AUTH_PASSWORD` | `reviewer`, `demo-pass-1234` | Shared demo login for `/app` and the API; the defaults are public and must be overridden on a deployment. |
+| `AUTH` | `enabled` | `disabled` turns the sign-in off. |
+| `SESSION_SECRET` | random per process | Keeps sessions valid across restarts. |
+| `RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_MS` | `60`, `60000` | Per-client limit on `POST`/`DELETE` under `/api`; `0` disables. |
+| `RUN_DELETION` | `enabled` | `disabled` refuses `DELETE /api/runs/:runId` with 403. |
+| `TRUST_PROXY` | `false` | Trust `X-Forwarded-*` only behind a proxy you control. |
 
 The project declares Node `>=24 <25`. Node 24 and an actual Docker runtime have
 not yet been verified in the recorded development environment.
@@ -821,8 +847,8 @@ the Node API is experimental and the project has no migration/backup tooling.
 
 ### Current limitations
 
-- No authentication, RBAC, tenant isolation, or verified reviewer identity.
-- No API rate limiting, paid-model quota, or cost circuit breaker.
+- One optional shared demo login; no user accounts, RBAC, tenant isolation or verified reviewer identity.
+- The rate limiter is per process and in memory; there is no paid-model quota or cost circuit breaker.
 - Synthetic policies and rules are not legal or business guidance.
 - Offline extraction supports simple English/ISO-date patterns only.
 - No overall run deadline or worker isolation.

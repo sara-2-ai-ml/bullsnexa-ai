@@ -13,6 +13,17 @@ const COUNTRIES: readonly [RegExp, string][] = [
   [/\bitaly\b/i, "IT"],
   [/\bfrance\b/i, "FR"],
   [/\bspain\b/i, "ES"],
+  [/\b(netherlands|holland)\b/i, "NL"],
+  [/\bbelgium\b/i, "BE"],
+  [/\baustria\b/i, "AT"],
+  [/\bswitzerland\b/i, "CH"],
+  [/\bpoland\b/i, "PL"],
+  [/\bportugal\b/i, "PT"],
+  [/\bireland\b/i, "IE"],
+  [/\bsweden\b/i, "SE"],
+  [/\bgreece\b/i, "GR"],
+  [/\bcanada\b/i, "CA"],
+  [/\baustralia\b/i, "AU"],
 ];
 
 const CHANNELS: readonly [RegExp, string][] = [
@@ -42,6 +53,15 @@ const CATEGORIES = [
   "healthcare",
   "gambling",
   "alcohol",
+  "software",
+  "fashion",
+  "beauty",
+  "entertainment",
+  "sports",
+  "telecom",
+  "energy",
+  "insurance",
+  "real estate",
 ];
 
 const KPIS = ["purchases", "leads", "installs", "clicks", "sessions", "impressions"];

@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in · BullsNexa</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+:root{--ink:#0b0b12;--muted:#5f5f6c;--navy:#232c5b;--peri:#b2aaf1;--line:#d6d6dc;--red:#c92a4b;--red-soft:#fdebef;
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,ui-serif,serif;
+  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+*{box-sizing:border-box;margin:0}
+body{min-height:100vh;display:grid;place-items:center;padding:24px 16px;font:15px/1.5 var(--sans);color:var(--ink);
+  background:radial-gradient(circle at 1px 1px,rgba(35,44,91,.12) 1px,transparent 0) 0 0/22px 22px,linear-gradient(180deg,#b2aaf1 0%,#d4c8ed 38%,#e9e9e9 100%)}
+.card{width:min(420px,100%);background:#fff;border-radius:24px;padding:30px 28px;box-shadow:0 30px 60px -34px rgba(35,44,91,.7)}
+.brand{display:flex;align-items:center;gap:10px;font:400 27px/1 var(--serif);letter-spacing:-.04em;text-decoration:none;color:inherit}
+.brand svg{width:36px;height:36px;flex:none}
+.brand span{font-style:italic;color:var(--navy);padding-left:.04em}
+h1{font:400 30px/1.1 var(--serif);letter-spacing:-.02em;margin:22px 0 6px}
+.sub{color:var(--muted);font-size:14px;margin-bottom:18px}
+label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:14px 0 6px}
+input{width:100%;font:inherit;padding:11px 13px;border:1px solid var(--line);border-radius:12px;background:#f4f4f7;color:var(--ink)}
+input:focus{outline:2px solid var(--navy);outline-offset:1px;background:#fff}
+button{width:100%;margin-top:20px;font:600 15px var(--sans);padding:12px 16px;border:0;border-radius:999px;background:var(--navy);color:#fff;cursor:pointer;box-shadow:0 14px 24px -14px rgba(35,44,91,.9)}
+button:hover{filter:brightness(1.12)}button:disabled{opacity:.6;cursor:default}
+.pw{position:relative}
+.pw input{padding-right:48px}
+.eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:38px;height:38px;margin:0;padding:0;display:grid;place-items:center;border-radius:10px;background:transparent;color:var(--muted);box-shadow:none}
+.eye:hover{background:#e9e7f6;color:var(--navy);filter:none}
+.eye:focus-visible{outline:2px solid var(--navy);outline-offset:1px}
+.eye svg{width:20px;height:20px}
+.eye .off{display:none}.eye[aria-pressed="true"] .on{display:none}.eye[aria-pressed="true"] .off{display:block}
+.err{display:none;margin-top:14px;padding:10px 12px;border-radius:12px;background:var(--red-soft);color:var(--red);font-size:13.5px}
+.err.on{display:block}
+.fine{margin-top:18px;font-size:12.5px;color:var(--muted)}
+.fine a{color:var(--navy)}
+</style>
+</head>
+<body>
+<main class="card">
+  <a class="brand" href="/" aria-label="BullsNexa home">
+    <svg viewBox="0 0 36 36" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#232c5b"/><stop offset="1" stop-color="#7c6fe0"/></linearGradient></defs><rect width="36" height="36" rx="10" fill="url(#g)"/><path d="M7.5 7C7.5 13.2 12 16.4 18 16.4S28.5 13.2 28.5 7" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/><circle cx="18" cy="24" r="5.2" fill="none" stroke="#fff" stroke-width="3.2"/></svg>
+    <div>Bulls<span>Nexa</span></div>
+  </a>
+  <h1>Sign in</h1>
+  <p class="sub">Demo access. The login is in the README and in the email with the repository link.</p>
+  <form id="f" autocomplete="on">
+    <label for="u">Username</label>
+    <input id="u" name="username" autocomplete="username" required maxlength="100" autofocus>
+    <label for="p">Password</label>
+    <div class="pw">
+      <input id="p" name="password" type="password" autocomplete="current-password" required maxlength="200">
+      <button class="eye" id="eye" type="button" aria-label="Show password" aria-pressed="false" aria-controls="p">
+        <svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+        <svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.1M6.6 6.6C3.9 8.3 2 12 2 12s3.5 7 10 7c1.8 0 3.4-.5 4.8-1.3"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+      </button>
+    </div>
+    <div class="err" id="err" role="alert"></div>
+    <button id="go" type="submit">Open the app</button>
+  </form>
+  <p class="fine">Synthetic data only. Not in production. <a href="/">Back to the home page</a></p>
+</main>
+<script>
+"use strict";
+const f = document.getElementById("f"), err = document.getElementById("err"), go = document.getElementById("go");
+const pw = document.getElementById("p"), eye = document.getElementById("eye");
+eye.addEventListener("click", () => {
+  const show = pw.type === "password";
+  pw.type = show ? "text" : "password";
+  eye.setAttribute("aria-pressed", String(show));
+  eye.setAttribute("aria-label", show ? "Hide password" : "Show password");
+  pw.focus();
+});
+f.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  err.classList.remove("on");
+  pw.type = "password"; eye.setAttribute("aria-pressed", "false"); eye.setAttribute("aria-label", "Show password");
+  go.disabled = true;
+  try {
+    const res = await fetch("/api/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: document.getElementById("u").value, password: document.getElementById("p").value })
+    });
+    if (res.ok) { location.href = "/app"; return; }
+    let message = "Could not sign in.";
+    try { const data = await res.json(); if (data && data.error && data.error.message) message = data.error.message; } catch { /* keep default */ }
+    err.textContent = message;
+    err.classList.add("on");
+  } catch {
+    err.textContent = "The server could not be reached.";
+    err.classList.add("on");
+  }
+  go.disabled = false;
+});
+</script>
+</body>
+</html>

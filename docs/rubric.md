@@ -117,3 +117,22 @@ A same-day campaign with otherwise complete, compliant data scores all 5 date-po
 ## Country format and privacy trigger
 
 Country input uses a trimmed, uppercase ISO 3166-1 alpha-2 representation such as `DE` or `US`. Normalization is limited to trimming and uppercasing; names such as `Germany` are not guessed. The versioned EU list in the typed configuration drives a synthetic review trigger: `objective === "leads"` and an EU country requires human review. This is an internal demonstration rule, not a claim that EU lead-generation campaigns violate privacy law.
+
+## Plan quality (advisory)
+
+Separate from the readiness score above, and **never** used for status, score or approval. Version `1.0.0`, implemented in `src/domain/plan-quality.ts`. It is computed only for a fully valid brief that is not `BLOCKED`. It starts at 100 and deducts:
+
+| Signal | Severity | Points | Trigger (synthetic thresholds) |
+| --- | --- | ---: | --- |
+| `KPI_TARGET_AMBITIOUS` | warning | 25 | Implied cost per result below the range: leads 5–150, purchases 10–250, installs 0.5–15, clicks 0.2–5, sessions 0.1–4, impressions/reach 1–40 per 1,000; or a cost-per-lead/install target below its range; or ROAS above 10; or revenue above 10× the budget. |
+| `KPI_TARGET_LOW` | info | 10 | Implied cost per result above the range (the budget could support more). |
+| `THIN_DAILY_BUDGET` | warning | 20 | Budget per day below 20. |
+| `LOW_DAILY_BUDGET` | info | 10 | Budget per day from 20 up to 50. |
+| `SHORT_FLIGHT` | warning | 10 | Fewer than 7 days, start and end inclusive. |
+| `LONG_FLIGHT` | info | 5 | More than 92 days. |
+| `VERY_SHORT_LEAD_TIME` | warning | 15 | Starts in 0–2 days from the evaluation date. |
+| `SHORT_LEAD_TIME` | info | 8 | Starts in 3–6 days. |
+| `SINGLE_CHANNEL` | info | 5 | One distinct channel. |
+| `BROAD_AUDIENCE` | info | 5 | Audience description shorter than 20 characters. |
+
+The total is floored at 0. Label: 85–100 `Strong`, 65–84 `Fair`, below 65 `Weak`. Amounts are in campaign currency units and the same ranges apply to USD, EUR and GBP.

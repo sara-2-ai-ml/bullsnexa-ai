@@ -4,6 +4,23 @@
 
 **Not in production today.** See [Real-world usage](#real-world-usage).
 
+## In one minute
+
+![BullsNexa system overview](docs/system-overview.png)
+
+*Overview of components and data flow. Details, sequences and the threat model are in [docs/SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN.md).*
+
+| | |
+| --- | --- |
+| **What it is** | An agent that checks an advertising campaign brief before it launches and returns `READY`, `NEEDS_REVIEW` or `BLOCKED` with a 0–100 readiness score, the reasons, a launch plan and a full trace. A separate advisory **plan-quality** score shows how sensible the plan looks (KPI realism, budget pacing, timing). |
+| **Who decides** | The model proposes the next step; deterministic backend code validates, authorizes, executes and decides. A person approves anything risky. |
+| **Run it** | `npm ci && npm run build && npm start`, then open <http://127.0.0.1:3000> and press **Open the app**. Demo login: **`reviewer`** / **`demo-pass-1234`**. No API key needed: the default provider is offline. |
+| **Verify it** | `npm test` (unit + integration), `npm run eval` (15 agent cases incl. injection and faults), `npm run examples` (sample briefs vs stored expected outputs). |
+| **Stack** | Node + TypeScript (strict ESM), Fastify, Zod, `node:sqlite`, Vitest. No agent framework: a small custom orchestrator, justified in [Trade-offs](#trade-offs-and-decisions). |
+| **Status** | Technical-assignment prototype on synthetic data. **Not in production today.** |
+
+Deeper reading: [How it works](#how-it-works) · [Architecture](#architecture) · [docs/SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN.md) (components, sequences, threat model, ADRs, design patterns).
+
 ## Problem statement
 
 Campaign teams receive briefs that are incomplete, inconsistent or non-compliant: a missing objective, a budget that is negative or unusually high, an end date before the start date, a channel nobody supports, a lead campaign aimed at the EU without a privacy review. Catching this by hand before launch is slow and error-prone, and the cost of missing it is wasted spend or a policy breach.
@@ -53,7 +70,7 @@ POST /api/extract  --draft brief-->  person reviews / edits
 
 **Out of scope (not implemented)**
 - Publishing to any advertising platform, spending money, or any external side effect.
-- Authentication, users, roles, multi-tenancy.
+- Real authentication: individual user accounts, roles, multi-tenancy (only one shared demo login exists, see Access control).
 - Real client data, real legal or compliance guidance, real company policies.
 - Optimized budget allocation (the channel split is an equal-split placeholder).
 - A multi-agent system (see [Trade-offs](#trade-offs-and-decisions)).
@@ -83,7 +100,38 @@ $env:AGENT_PROVIDER="simulated"
 npm start
 ```
 
-Open <http://127.0.0.1:3000> for the home page and press **Open the app** (or go straight to <http://127.0.0.1:3000/app>). In the app, pick a sample brief (or describe a campaign in your own words and press **Extract fields**), press **Run agent**, inspect the verdict, score breakdown, launch plan and trace, and — for `NEEDS_REVIEW` runs — approve or reject. Recent runs are listed under the form.
+Open <http://127.0.0.1:3000> for the home page and press **Open the app** (or go straight to <http://127.0.0.1:3000/app>). Sign in with **`reviewer`** / **`demo-pass-1234`**. In the app, pick a sample brief (or describe a campaign in your own words and press **Extract fields**), press **Run agent**, inspect the verdict, score breakdown, launch plan and trace, and — for `NEEDS_REVIEW` runs — approve or reject. Recent runs are listed under the form.
+
+### Evaluation checklist
+
+| Reviewer check | Evidence | Run it |
+| --- | --- | --- |
+| Multi-step AI agent | Bounded planner loop with typed state and separate execution/business statuses | `npm run demo:agent` |
+| Four business tools | Field check, policy search, readiness evaluation, launch-plan creation | `npm test -- tests/agent.test.ts tests/launch-plan.test.ts` |
+| Structured JSON and readable summary | `/api/runs` contract plus the Step 3 decision center | `npm test -- tests/runs-api.test.ts` |
+| Deterministic decisions | Versioned readiness rules remain authoritative; plan quality is advisory | `npm test -- tests/readiness.test.ts tests/plan-quality.test.ts` |
+| Validation and guardrails | Zod schemas, tool authorization, ordering and execution limits | `npm test -- tests/domain-schemas.test.ts tests/agent.test.ts` |
+| Retry, timeout and error handling | One classified transient retry, bounded operations, safe failures | `npm test -- tests/agent-reliability.test.ts` |
+| Prompt-injection resistance | Untrusted-data delimiters plus deterministic backend enforcement | `npm run eval` |
+| Logs, traces and usage | Correlated tool traces, latency/attempts and live-provider usage metadata | `npm run demo:agent` |
+| Unit and integration tests | Domain, agent, HTTP, storage, security and approval coverage | `npm test` |
+| Real-browser E2E | Five deterministic Chromium journeys using an isolated in-memory SQLite database | `npx playwright install chromium && npm run test:e2e` |
+| Samples and expected outputs | Versioned briefs and checked expected results | `npm run examples` |
+
+### Manual scenarios (about 3 minutes)
+
+Start the app (`AGENT_PROVIDER=simulated npm start`), sign in, then paste each text into **Describe the campaign**, press **Extract fields**, review Step 2 and press **Run agent**. Results below were produced with the offline `simulated` provider; with live Claude the extracted wording may differ slightly, but the status and scores come from the deterministic rules.
+
+| # | Input | Expected result |
+| --- | --- | --- |
+| 1 | `Called "Winter Coats Sale". Objective: sales. Audience: adults 25-45 who buy winter clothing online. Budget 15k EUR on Instagram and Google in Germany, 2027-01-05 to 2027-02-04, aim for 400 purchases. Category: fashion.` | `READY`, rule readiness 100, plan quality 100 (Strong) |
+| 2 | `Called "Flash Sneaker Drop". Objective: sales. Audience: sneaker fans in Germany. Budget 500 EUR on Instagram in Germany, 2027-03-01 to 2027-03-03, aim for 900 purchases. Category: fashion.` | `READY`, rule readiness 100, plan quality 60 (Weak): passes the required checks, but the plan needs attention |
+| 3 | Pick the sample **High budget** | `NEEDS_REVIEW` with a human Approve / Reject step |
+| 4 | In Step 2, set the budget to `-500` and press **Run agent** | `BLOCKED`, no launch plan, no approval possible |
+| 5 | Pick the sample **Prompt injection** | The injected text changes nothing: same decision as the **Complete brief** sample |
+| 6 | After any run, edit the budget field | The result is marked outdated until **Run agent** is pressed again; an earlier approval does not carry over |
+
+All commands except the explicitly named live smoke commands use offline providers and require no Anthropic credentials. The browser suite starts its own simulated-provider server with isolated in-memory storage and never loads `.env`.
 
 ### Provider modes
 
@@ -96,6 +144,8 @@ Open <http://127.0.0.1:3000> for the home page and press **Open the app** (or go
 | `anthropic` | Live Claude through the Messages API with tool calling. No silent fallback: missing configuration is a clear 503/startup error. | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` |
 
 Copy `.env.example` to `.env` for the live mode. The key is never logged, returned, or sent to the model.
+
+The app asks for a sign-in. The demo login is **`reviewer`** / **`demo-pass-1234`**; change it with `AUTH_USERNAME` and `AUTH_PASSWORD`, or set `AUTH=disabled` to switch the sign-in off — see [Access control and limits](#access-control-and-limits).
 
 ### Docker
 
@@ -125,6 +175,16 @@ Run one yourself (server running, `curl` on bash; PowerShell users can use the U
 
 ```bash
 curl -s -X POST http://127.0.0.1:3000/api/runs \
+  -H 'content-type: application/json' \
+  -d "{\"brief\": $(cat examples/briefs/02-high-budget-needs-review.json)}"
+```
+
+The API sits behind the demo sign-in. For `curl`, either start the server with `AUTH=disabled`, or sign in first and reuse the cookie:
+
+```bash
+curl -s -c cookies.txt -H 'content-type: application/json' \
+  -d '{"username":"reviewer","password":"demo-pass-1234"}' http://127.0.0.1:3000/api/login
+curl -s -b cookies.txt -X POST http://127.0.0.1:3000/api/runs \
   -H 'content-type: application/json' \
   -d "{\"brief\": $(cat examples/briefs/02-high-budget-needs-review.json)}"
 ```
@@ -168,6 +228,12 @@ Abridged real response (`AGENT_PROVIDER=mock`; the full response also carries th
 
 The response also lists the trace: `AGENT_STARTED`, then for each tool `ACTION_PROPOSED` → `TOOL_STARTED` → `TOOL_SUCCEEDED` (with `durationMs` and `attempt`), and finally `AGENT_COMPLETED`.
 
+### Readiness score vs plan quality
+
+The **readiness score** (0–100) answers *"may this launch?"*: it measures whether the brief is complete, valid and policy-compliant, so every sound brief scores 100 and the status does the deciding. On its own it cannot tell a sound plan from an unrealistic one.
+
+So each run that is not `BLOCKED` also gets an advisory **plan-quality** score (`planQuality` in the response, a "Plan quality" card in the UI). It starts at 100 and deducts points for: a KPI target outside a synthetic cost-per-result range (−25 or −10), a thin daily budget (−20 or −10), a flight shorter than 7 or longer than 92 days (−10 or −5), a start within 3 or 7 days (−15 or −8), a single channel (−5), and a vague audience (−5). It is a pure, deterministic function (`src/domain/plan-quality.ts`) and **never changes the status, readiness score or approval**. Example: two `READY` briefs, both 100 for readiness — 500 purchases on 25,000 USD scores 100 for plan quality, 20,000 purchases on the same budget scores 75 ("KPI target looks ambitious"). Rules: [docs/rubric.md](docs/rubric.md#plan-quality-advisory).
+
 > The sample dates are in 2027. A start date in the past is itself a review trigger, so after those dates pass, live runs of the samples will change; `npm run examples` is unaffected because it uses a fixed date.
 
 ## System Design
@@ -185,7 +251,7 @@ see [System Design](docs/SYSTEM_DESIGN.md).
 | Approval | `src/approval` | Handoff rule and plan-hash approval integrity. |
 | Persistence | `src/persistence` | SQLite (Node's built-in `node:sqlite`): runs, trace events, approvals. |
 | HTTP | `src/routes`, `src/app.ts` | Fastify routes, validation, safe error envelope, request ids. |
-| UI | `public/index.html` (home), `public/app.html` (tool) | Single files, no framework, no external resources, text-only DOM writes, strict CSP. |
+| UI | `public/*.html`, `public/js` | Framework-free HTML/CSS plus focused ES modules for API access, validation, stateful workflow and decision presentation; text-only DOM writes and strict same-origin CSP. |
 | Evaluation | `src/eval`, `evals`, `examples` | 15-case agent evaluation, fault injection, sample inputs/outputs. |
 
 ### Agent design
@@ -219,7 +285,7 @@ see [System Design](docs/SYSTEM_DESIGN.md).
 - Every run is stored: brief, decision, per-step trace with latency and attempt number, token usage (live mode only), total duration. `GET /api/runs` and `GET /api/runs/:id` expose them.
 - Handoff is a deterministic rule: `BLOCKED` → `NOT_ELIGIBLE` (cannot be approved); `NEEDS_REVIEW` or evaluator-flagged → `PENDING_APPROVAL`; otherwise `CLEARED`.
 - An approval must carry the SHA-256 `planHash` of the brief, decision and launch plan the reviewer saw. A stale hash is rejected, a second decision is rejected, and an approval stops counting (`APPROVAL_INVALIDATED`) if the stored plan no longer matches.
-- **There is no authentication**: the reviewer name is a free-text label, not an audit-grade identity.
+- **The shared demo sign-in is not reviewer identity.** It gates access to the prototype, but the approval reviewer name remains a free-text audit label and is not an authenticated user identity.
 
 ## API
 
@@ -228,16 +294,19 @@ see [System Design](docs/SYSTEM_DESIGN.md).
 | `GET /` | Home page. |
 | `GET /app` | The working tool (single-page UI). |
 | `GET /health` | Liveness. |
-| `GET /api/config` | Provider mode and the evaluation date in use. |
+| `GET /api/config` | Provider mode, the evaluation date in use, and two UI switches. |
 | `POST /api/extract` `{ text }` | Free text → draft brief, field lists, notice to review. |
 | `POST /api/runs` `{ brief }` | Run the agent; returns decision, summary, trace, handoff, launch plan, plan hash. |
 | `GET /api/runs` | Last 20 runs. |
 | `GET /api/runs/:id` | One run with trace, plan and approval. |
 | `POST /api/runs/:id/approval` | `{ decision, reviewer, comment?, planHash }`. |
-| `DELETE /api/runs/:id` | Remove a run with its trace and approval (204, or 404). The demo has no authentication. |
+| `DELETE /api/runs/:id` | Remove a run with its trace and approval (204, 404, or 403 when `RUN_DELETION=disabled`). |
+| `GET /api/metrics` | Request counts per route template and status, and aggregate run counts. No brief content. |
+| `POST /api/login`, `POST /api/logout` | Only when a demo login is configured; sets or clears the session cookie. |
+| `GET /login` | Sign-in page (only reachable as a page; it is always served). |
 | `GET /images/:name` | Decorative photos from a fixed allowlist (same-origin). |
 
-Errors share one envelope, `{ "error": { "code", "message" }, "requestId" }`, with 400 (invalid input), 404, 409 (approval conflicts), 413 (body too large), 503 (live provider not configured) and 504/502 (extraction timeout/provider error). Body limits: 32 KB runs, 16 KB extract, 4 KB approval.
+Errors share one envelope, `{ "error": { "code", "message" }, "requestId" }`, with 400 (invalid input), 401 (not signed in / wrong credentials), 403 (deletion disabled), 404, 409 (approval conflicts), 413 (body too large), 429 (rate limited, with `Retry-After`), 503 (live provider not configured) and 504/502 (extraction timeout/provider error). Body limits: 32 KB runs, 16 KB extract, 4 KB approval.
 
 ## Configuration
 
@@ -247,12 +316,31 @@ Errors share one envelope, `{ "error": { "code", "message" }, "requestId" }`, wi
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | – | Required only for `anthropic`. `.env.example` suggests `claude-haiku-5-5`. |
 | `DATABASE_PATH` | `var/bullsnexa.sqlite` | SQLite file (git-ignored). |
 | `HOST`, `PORT` | `127.0.0.1`, `3000` | Listen address. |
+| `AUTH_USERNAME`, `AUTH_PASSWORD` | `reviewer`, `demo-pass-1234` | Sign-in for `/app` and the API. The defaults are public demo credentials; override them on a deployment. |
+| `AUTH` | `enabled` | `disabled` turns the sign-in off. |
+| `SESSION_SECRET` | random per process | Optional; keeps sessions valid across restarts. |
+| `RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_MS` | `60`, `60000` | Per-client limit on `POST`/`DELETE` under `/api`. `0` disables it. |
+| `RUN_DELETION` | `enabled` | `disabled` makes `DELETE /api/runs/:id` answer 403 and hides the control in the UI. |
+| `TRUST_PROXY` | `false` | Set to `true` only behind a reverse proxy you control (client IP and `Secure` cookies). |
+
+### Access control and limits
+
+The prototype has no user accounts. It uses **one shared login**, on by default (`reviewer` / `demo-pass-1234`, public on purpose so reviewers can get in):
+
+- Without a session, `/app` redirects to `/login` and every `/api` route except `/api/login` answers 401.
+- The session is a signed, expiring cookie (HMAC-SHA256, 8 hours, `HttpOnly`, `SameSite=Strict`, `Secure` over HTTPS). Credentials are compared in constant time, and sign-in attempts are limited to 10 per minute per client.
+- The home page, `/login`, `/health`, the favicon and the decorative images stay public.
+- `POST`/`DELETE` under `/api` are limited to 60 requests per minute per client (fixed window, in memory, per process) and answer 429 with `Retry-After`.
+- `GET /api/metrics` exposes operational counters only: method, route **template**, status code, and aggregate run counts. It never returns a brief, trace or approval.
+
+This is a demo access gate, **not** production authentication: the default password is published here, the server logs a warning while it is in use, and there is one shared account, no roles, no password reset, no account lockout, and the limiter is per process rather than shared across instances. Real deployment still needs identity, RBAC, tenant isolation and an immutable audit log — see [Limitations](#limitations).
 
 ## Verification
 
 ```bash
 npm run typecheck     # strict TypeScript
-npm test              # unit, integration and end-to-end tests (offline)
+npm test              # unit and HTTP integration tests (offline)
+npm run test:e2e      # five real-browser Chromium journeys (offline)
 npm run build
 npm run eval          # 15 evaluation cases through the real agent, offline
 npm run examples      # sample inputs vs expected outputs
@@ -267,15 +355,16 @@ All tests are offline and deterministic (explicit dates, scripted or simulated p
 
 | Item | Status |
 | --- | --- |
-| Current verification on Node 25.6.1 (Windows) | Tests: 17 files / 229 passed (run by the author after the final UI and run-deletion changes). Typecheck, build, `eval` 15/15 and `examples` 7/7 passed in the earlier publication verification on Windows, and `eval` 15/15 and `examples` (all match) were re-run after the final changes on Node 22 (Linux). Node 25 is outside the declared `>=24 <25` engine range. |
+| Current verification | Typecheck passed; 21 Vitest files / 270 tests passed; 5/5 Playwright Chromium journeys passed; `eval` 15/15, `examples` 7/7, production build and dependency audit passed locally on Windows. Node 25.6.1 is outside the declared `>=24 <25` engine range. |
 | Earlier verification on Node 22.23.4 (Linux) | 17 files / 213 tests, `eval` 15/15, and all examples passed before the final reliability fixes. |
 | Node 24 LTS (the stated target) | **Not verified.** |
 | Live Claude, one smoke run (`AGENT_PROVIDER=anthropic`, `npm run smoke:agent`, 2026-11-12, author's Windows machine) | **PASS.** One run on the sample complete brief: `COMPLETED`, `READY`, score 100, tools `checkCampaignFields` then `evaluateCampaignReadiness`, 3 provider requests, 6199 input / 55 output tokens. This is a single run, not a quality or robustness evaluation; behavior on other briefs, on injection attempts and on live free-text extraction is covered only by the scripted-protocol tests. |
 | Extraction quality on messy real text | **Not verified.** Tests use a rule-based simulator and scripted responses. |
-| Docker build and run | **Not verified.** |
-| UI in multiple browsers | Seen in one browser only. |
+| Docker build and run | **Not verified locally:** Docker is not installed in the authoring environment. CI defines a real image-build job, but that workflow has not run yet. |
+| Browser E2E | **PASS locally:** 5/5 deterministic journeys in Playwright Chromium. Firefox, WebKit and broad device coverage are not included. |
+| GitHub Actions CI | **Not verified:** the workflow is defined but has not run on GitHub. |
 
-Current counts on Node 25.6.1 (Windows): 17 test files, 229 tests passed; `npm run eval` 15/15 and `npm run examples` 7/7 (also re-run on Node 22, Linux, after the last changes). Node 24 remains unverified.
+Current counts: 21 Vitest files / 270 tests plus 5 Playwright Chromium journeys (`npm run test:e2e`); `npm run eval` 15/15; `npm run examples` 7/7. Node 24 and GitHub-hosted CI remain unverified.
 
 To check live behavior yourself: put a key and model in `.env`, set `AGENT_PROVIDER=anthropic`, run `npm run smoke:agent` (one short run; prints status, tools and token usage only, never the key).
 
@@ -293,13 +382,15 @@ To check live behavior yourself: put a key and model in `.env`, set `AGENT_PROVI
 ## Limitations
 
 - Live Claude was verified with one smoke run only; Docker and Node 24 are unverified (see above).
-- No authentication or authorization; approvals are not audit-grade.
+- One optional shared demo login only: no user accounts, roles, tenant isolation or account lockout, and approvals are not audit-grade (a reviewer name is a label).
 - The country check validates the alpha-2 format only; it does not ship a full country registry.
-- The offline extractor understands simple English and ISO dates only.
+- The offline extractor understands simple English and ISO dates only, over a fixed list of countries and categories; the live mode handles free phrasing far better.
 - No overall run deadline; an operation that ignores `AbortSignal` is abandoned, not physically stopped.
 - SQLite data is local to the process or volume; there is no migration tooling, retention policy or backup.
-- No rate limiting on the HTTP API.
+- The rate limiter is a fixed window held in memory per process, so it does not hold across several instances or a restart.
+- `/api/metrics` is counters only: no histograms, percentiles, spans or export to a monitoring system.
 - The launch plan is a synthetic hand-off document; nothing is sent to any platform.
+- Plan-quality benchmarks are synthetic demonstration ranges, identical across currencies and industries; they are advice, not market data.
 
 ## Next steps
 
@@ -329,18 +420,22 @@ What productionizing would require:
 ## Repository layout
 
 ```text
-src/domain        rules, schemas, evaluator, launch plan
+src/domain        rules, schemas, evaluator, launch plan, plan quality
 src/agent         orchestrator, tools, providers, extraction, policy search
 src/approval      handoff and plan-hash integrity
 src/persistence   SQLite run store
 src/routes        HTTP routes
+src/http          login sessions, rate limiter, request counters
 src/eval          15-case agent evaluation
 src/examples      example runner
-public            home page (index.html) and tool UI (app.html)
+public            HTML pages plus framework-free browser modules under public/js
+tests/e2e         Playwright browser journeys with isolated temporary storage
+.github/workflows offline CI quality, browser, Docker and dependency-audit jobs
 data/synthetic-policies   five synthetic policy documents
 evals             evaluation dataset
 examples          sample inputs and expected outputs
 tests             all tests (offline)
+docs/SYSTEM_DESIGN.md     components, sequences, threat model, ADRs, design patterns
 docs/rubric.md    exact scoring rubric
 ENGINEERING_LOG.md   phase-by-phase record of decisions and verification
 ```

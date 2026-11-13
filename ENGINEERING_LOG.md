@@ -40,25 +40,34 @@ The orchestrator enforces strict Zod action schemas, tool authorization, tool pr
 
 SQLite stores runtime-validated runs, ordered trace events, and at most one approval per run. Approval integrity uses the v2 SHA-256 domain `bullsnexa:approval-plan:v2`, binding the specific `runId`, brief, trusted decision, and derived launch plan. Corrupt stored JSON fails closed, concurrent approvals cannot both succeed, and a persisted data change invalidates an earlier approval.
 
-Security boundaries include bounded input, request-size limits, fixed policy paths, strict provider/tool output validation, Pino redaction, no request-body logging, sanitized client errors, same-origin UI requests, restrictive CSP, and text-only dynamic DOM rendering. Production authentication, RBAC, tenant isolation, rate limiting, secret management, immutable auditing, and paid-model quotas are not implemented.
+Security boundaries include bounded input, request-size limits, fixed policy paths, strict provider/tool output validation, Pino redaction, no request-body logging, sanitized client errors, same-origin UI requests, restrictive CSP, text-only dynamic DOM rendering, a shared demo access gate, and per-process fixed-window rate limits. The access gate is not production authentication: RBAC, tenant isolation, distributed rate limiting, production secret management, immutable auditing, and paid-model quotas are not implemented.
 
 ### API, UI, evaluation, and current verification
 
-The API provides health, configuration, extraction, agent execution, history, detail, and approval endpoints. The homepage links to a guided UI that supports extraction, editable form/JSON input, explicit agent execution, decisions, score explanations, risks, launch plans, traces, token usage, history, and approval. Approval controls are hidden when persistence fails.
+The API provides health, configuration, extraction, agent execution, history, detail, approval, demo-authentication, and aggregate-metrics endpoints. The homepage links to a guided UI that supports extraction, a structured campaign form (no user-facing JSON editor), explicit agent execution, decisions, score explanations, recommendations, launch plans, collapsed technical details, history, and approval. Approval controls are hidden when persistence fails or when form edits make the displayed assessment stale. Browser code is split into same-origin ES modules for API access, date validation and decision presentation, while DOM rendering remains text-only.
 
 The offline suite covers domain rules, agent orchestration, Anthropic protocol handling, extraction, policy retrieval, reliability, persistence, approval integrity, API behavior, static Docker configuration, executable examples, and the 15-case evaluation. The latest confirmed publication verification is:
 
 | Check | Current confirmed result |
 | --- | --- |
 | Typecheck | PASS |
-| Automated tests | PASS — 225/225 across 17 files |
+| Automated tests | PASS — 270/270 across 21 Vitest files |
 | Agent evaluations | PASS — 15/15 |
 | Executable examples | PASS — 7/7 |
 | Production build | PASS |
+| Browser E2E | PASS — 5/5 Playwright Chromium journeys |
+| Dependency audit | PASS — 0 vulnerabilities reported by `npm audit --audit-level=high` |
 | Verification runtime | Node.js 25.6.1 on Windows |
 | Declared target | Node.js 24; not yet verified |
 | Live Claude | One documented successful smoke run only; not a live evaluation suite |
-| Docker runtime | Not verified; Dockerfile checks are static |
+| Docker runtime | Not verified locally; Docker is unavailable. GitHub Actions defines an image-build job but has not run. |
+
+### Final engineering-quality upgrade (2026-11-13)
+
+- Added a concise reviewer checklist and synchronized the current documentation with the shared demo login, four tools, extraction/review boundary, readiness-versus-quality distinction, approval integrity and production limits.
+- Extracted the growing application script from `app.html` into allowlisted ES modules without adding a frontend framework or runtime dependency.
+- Added five Playwright Chromium journeys covering extraction, validation, the three business outcomes, recommendations/stale state, approval and history/mobile/keyboard usability. The server uses the simulated provider and an isolated in-memory SQLite database; it does not load `.env`.
+- Added least-privilege GitHub Actions jobs for offline quality checks, Playwright, Docker build and high-severity dependency audit. CI results remain unverified until GitHub Actions runs.
 
 The architecture deliberately uses a small custom orchestrator rather than LangGraph or a multi-agent graph. Confirmed patterns include provider Strategy, environment-backed Factory, explicit State Machine, structured action Command, authorized tool Registry, SQLite Repository, and function/options-based Dependency Injection. Strategy, Factory, and Command are GoF-inspired; State Machine, Registry, and Repository are architectural patterns; Dependency Injection is a composition technique.
 
@@ -371,7 +380,7 @@ Phase 2B stops here pending review.
 
 Phase 3 stops here pending review.
 
-## Run API, UI and Phase 4 — free-text brief intake
+## Phase 4 — Run API, UI and free-text brief intake
 
 **Decision.** Natural-language input is the main gap between the evaluator and a usable tool, so extraction is added as a separate, narrow step in front of the unchanged agent. It is not part of the decision path: Claude only transcribes explicitly stated fields into a draft brief; validation, scoring and status remain deterministic.
 
@@ -409,7 +418,7 @@ Phase 3 stops here pending review.
 
 **Not verified.** Live Claude behavior, Docker image build and run (no Docker in the authoring environment; a static test only), Node 24, UI in several browsers, load. **Not in production today.**
 
-## Phase 3 closure — deterministic launch plan
+## Phase 3 closure (completed after Phase 6) — deterministic launch plan
 
 **Gap closed.** The roadmap's Phase 3 lists `createLaunchPlan` and a human-readable summary; only the summary existed. The plan is built by a pure function from the validated brief and the trusted decision, so the model cannot influence its content. It is also exposed as an optional tool (after evaluation only, no arguments) to match the roadmap, but the API computes it from stored data and does not depend on the model calling it.
 
